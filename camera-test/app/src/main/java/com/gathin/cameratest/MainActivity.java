@@ -544,14 +544,14 @@ public final class MainActivity extends Activity {
     }
     private void openFromGrid(int index){
         if(!"grid".equals(screen)||index<0||index>=cameras.size()||SystemClock.uptimeMillis()<ignoreConfirmUntil)return;
-        selectedIndex=index;singleReturn="grid";showSingle(cameras.get(index),true);
+        selectedIndex=index;singleReturn="grid";VivintClient.Camera camera=cameras.get(index);showSingle(camera,preferredHd(camera));
     }
     private void showList(){
         if(!unlocked("list","All cameras",allCameras.size()+" available cameras  ·  Choose a camera to view live",true))return;
         for(VivintClient.Camera c:allCameras){
             button((favorite(c)?"★  ":"")+c.name+(hidden(c)?"  ·  Hidden":"")+"   ›",()->{
                 int index=cameras.indexOf(c);if(index>=0){selectedIndex=index;gridPage=index/capacity();}
-                singleReturn="list";showSingle(c,true);
+                singleReturn="list";showSingle(c,preferredHd(c));
             });
         }
         button("Organize cameras",this::showManage);
@@ -584,6 +584,13 @@ public final class MainActivity extends Activity {
     private void leaveSingle(){
         if("list".equals(singleReturn))showList();else showGrid();
     }
+    private boolean preferredHd(VivintClient.Camera camera){
+        return getPreferences(MODE_PRIVATE).getBoolean("singleHD:"+camera.key,true);
+    }
+    private void rememberQuality(VivintClient.Camera camera,boolean hd){
+        getPreferences(MODE_PRIVATE).edit().putBoolean("singleHD:"+camera.key,hd).apply();
+    }
+    private Button qualityButton;
     private void showSingle(VivintClient.Camera camera,boolean hd){singleFocus=0;showSingle(camera,hd,false);}
     private void showSingle(VivintClient.Camera camera,boolean hd,boolean audio){
         if(!unlocked("single",camera.name,"Live camera",false))return;
@@ -593,7 +600,7 @@ public final class MainActivity extends Activity {
         Button back=tool(bar,"‹ Cameras",this::leaveSingle);
         tool(bar,"‹ Previous",()->{singleFocus=1;stepCamera(-1);});
         tool(bar,"Next ›",()->{singleFocus=2;stepCamera(1);});
-        tool(bar,hd?"HD":"SD",()->{singleFocus=3;showSingle(camera,!activeHd,activeAudio);});
+        qualityButton=tool(bar,hd?"Quality: HD":"Quality: SD",()->{singleFocus=3;showSingle(camera,!activeHd,activeAudio);});
         tool(bar,audio?"Mute":"Audio",()->{singleFocus=4;showSingle(camera,activeHd,!activeAudio);});
         tool(bar,"Full screen",()->{singleFocus=5;hideControls.run();});
         audioStatus=status;
@@ -621,7 +628,7 @@ public final class MainActivity extends Activity {
         final int id=videoGeneration;
         playback.postDelayed(()->{
             if(id==videoGeneration&&"single".equals(screen))start(camera,hd,layout,status,0,audio);
-        },100);
+        },650);
     }
     private void revealControls(){
         if(singleBar==null)return;
@@ -635,7 +642,7 @@ public final class MainActivity extends Activity {
         VivintClient.Camera camera=allCameras.get(next);
         int visibleIndex=cameras.indexOf(camera);
         if(visibleIndex>=0){selectedIndex=visibleIndex;gridPage=visibleIndex/capacity();}
-        showSingle(camera,activeHd,false);
+        showSingle(camera,preferredHd(camera),false);
     }
     @Override public boolean dispatchKeyEvent(KeyEvent event){
         int code=event.getKeyCode();
@@ -674,7 +681,8 @@ public final class MainActivity extends Activity {
     }
     private static final class Slot {
         MediaPlayer player;
-        boolean output,closed;
+        boolean output,closed,frames,audioReady;
+        Media media;
         Slot(MediaPlayer player){this.player=player;}
         void close(){
             if(closed)return;closed=true;
@@ -682,6 +690,7 @@ public final class MainActivity extends Activity {
             try{player.stop();}catch(RuntimeException ignored){}
             try{player.detachViews();}catch(RuntimeException ignored){}
             try{player.release();}catch(RuntimeException ignored){}
+            if(media!=null){try{media.release();}catch(RuntimeException ignored){}media=null;}
         }
     }
     private void start(VivintClient.Camera camera,boolean hd,VLCVideoLayout layout,TextView label){
@@ -693,17 +702,22 @@ public final class MainActivity extends Activity {
             if(slot.closed)return;
             slot.close();players.remove(slot);
         }
-        if(attempt>=1){
-            label.setText("Stream unavailable · Try Refresh or switch quality");label.setVisibility(View.VISIBLE);return;
+        boolean single="single".equals(screen);
+        if(attempt>=(single?3:1)){
+            label.setText("Video unavailable · Try switching quality");label.setVisibility(View.VISIBLE);return;
         }
-        boolean fallback=hd&&camera.streams.stream().anyMatch(s->s.label.startsWith("SD"));
-        label.setText(fallback?"Reconnecting in SD…":"Reconnecting…");
+        boolean alternate=camera.streams.stream().anyMatch(s->s.label.startsWith(hd?"SD":"HD"));
+        boolean nextHd=single&&attempt%2==0&&alternate?!hd:hd;
+        label.setText(single?"Reconnecting video · "+(nextHd?"HD":"SD")+"…":"Reconnecting…");label.setVisibility(View.VISIBLE);
+        ViewGroup container=layout.getParent() instanceof ViewGroup?(ViewGroup)layout.getParent():null;
+        VLCVideoLayout fresh=new VLCVideoLayout(this);fresh.setFocusable(false);fresh.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        if(container!=null){container.removeView(layout);container.addView(fresh,new FrameLayout.LayoutParams(-1,-1));}
         playback.postDelayed(()->{
             if(id==videoGeneration&&!stopped&&unlockedScreen()){
-                if("single".equals(screen)&&fallback)activeHd=false;
-                start(camera,fallback?false:hd,layout,label,attempt+1,audio);
+                if(single){activeHd=nextHd;if(qualityButton!=null)qualityButton.setText(nextHd?"Quality: HD":"Quality: SD");}
+                start(camera,nextHd,container==null?layout:fresh,label,attempt+1,audio);
             }
-        },1500);
+        },900);
     }
     private void start(VivintClient.Camera camera,boolean hd,VLCVideoLayout layout,TextView label,int attempt,boolean audio){
         VivintClient.Stream stream=selectStream(camera,hd);
@@ -727,8 +741,8 @@ public final class MainActivity extends Activity {
                     if(id!=videoGeneration||slot.closed)return;
                     if(type==MediaPlayer.Event.Vout&&outputs>0){
                         slot.output=true;
-                        if("single".equals(screen))label.setText("Live"+(audio?" · Checking audio…":" · Muted"));
-                        else label.setVisibility(View.GONE);
+                        if("single".equals(screen)&&!slot.frames)label.setText("Waiting for video…");
+                        else if(!"single".equals(screen))label.setVisibility(View.GONE);
                     }
                     if(audio&&(type==MediaPlayer.Event.Playing||type==MediaPlayer.Event.Vout)){
                         playback.postDelayed(()->{
@@ -740,27 +754,55 @@ public final class MainActivity extends Activity {
                                     int current=slot.player.getAudioTrack();
                                     MediaPlayer.TrackDescription[] available=slot.player.getAudioTracks();
                                     if(current<0&&available!=null)for(MediaPlayer.TrackDescription track:available)if(track.id>=0){slot.player.setAudioTrack(track.id);break;}
-                                    label.setText(slot.player.getAudioTrack()>=0?"Live · Audio on":"Live · Audio track could not be selected");
-                                }else label.setText("Live · No audio track reported by camera");
-                            }catch(RuntimeException e){label.setText("Live · Audio status unavailable");}
+                                    slot.audioReady=slot.player.getAudioTrack()>=0;
+                                    if(slot.frames)label.setText(slot.audioReady?"Live · Audio on":"Live · Audio track unavailable");
+                                }else if(slot.frames)label.setText("Live · No audio track reported by camera");
+                            }catch(RuntimeException e){if(slot.frames)label.setText("Live · Audio status unavailable");}
                         },2500);
                     }
                     if(type==MediaPlayer.Event.EncounteredError||type==MediaPlayer.Event.EndReached)
                         reconnect(camera,hd,layout,label,attempt,audio,id,slot);
                 });
             });
-            Media media=new Media(vlc,Uri.parse(stream.address));
-            try{
-                media.setHWDecoderEnabled(true,false);
+            Media media=new Media(vlc,Uri.parse(stream.address));slot.media=media;
+            {
+                media.setHWDecoderEnabled(attempt<2,false);
                 media.addOption(":rtsp-tcp");media.addOption(":rtsp-user="+stream.username);
                 media.addOption(":rtsp-pwd="+stream.password);
                 if(!audio)media.addOption(":no-audio");
                 else media.addOption(":audio");
                 slot.player.setMedia(media);
-            }finally{media.release();}
+            }
             slot.player.setVolume(audio?100:0);
             slot.player.play();
-            playback.postDelayed(()->{
+            if("single".equals(screen)){
+                final long began=SystemClock.uptimeMillis();
+                playback.postDelayed(new Runnable(){
+                    long previous=-1;
+                    long lastFrame=began;
+                    @Override public void run(){
+                        if(id!=videoGeneration||slot.closed)return;
+                        long displayed=displayedPictures(slot);
+                        long now=SystemClock.uptimeMillis();
+                        if(displayed>0&&displayed!=previous){
+                            lastFrame=now;
+                            if(!slot.frames){slot.frames=true;rememberQuality(camera,hd);}
+                            label.setText("Live"+(audio?(slot.audioReady?" · Audio on":" · Audio requested"):" · Muted"));
+                        }
+                        previous=displayed;
+                        if(displayed<0&&slot.output){
+                            // Some LibVLC builds do not expose media statistics.
+                            // Do not assume frames are displayed; retain manual quality recovery.
+                            label.setText("Video connected"+(slot.audioReady?" · Audio on":""));
+                            return;
+                        }
+                        if(now-lastFrame>12000){
+                            reconnect(camera,hd,layout,label,attempt,audio,id,slot);return;
+                        }
+                        playback.postDelayed(this,2000);
+                    }
+                },2500);
+            }else playback.postDelayed(()->{
                 if(id==videoGeneration&&!slot.closed&&!slot.output)
                     reconnect(camera,hd,layout,label,attempt,audio,id,slot);
             },20000);
@@ -769,9 +811,16 @@ public final class MainActivity extends Activity {
             reconnect(camera,hd,layout,label,attempt,audio,id,null);
         }
     }
+    private long displayedPictures(Slot slot){
+        try{
+            Object stats=slot.media.getClass().getMethod("getStats").invoke(slot.media);
+            if(stats==null)return 0;
+            return ((Number)stats.getClass().getField("displayedPictures").get(stats)).longValue();
+        }catch(Exception|LinkageError e){return -1;}
+    }
     private void releaseAll(){
         videoGeneration++;playback.removeCallbacksAndMessages(null);ui.removeCallbacks(hideControls);
-        singleCanvas=null;singleBar=null;singleHeading=null;activeCamera=null;activeAudio=false;controlsHidden=false;tileButtons.clear();
+        qualityButton=null;singleCanvas=null;singleBar=null;singleHeading=null;activeCamera=null;activeAudio=false;controlsHidden=false;tileButtons.clear();
         for(Slot s:players)s.close();players.clear();
         if(vlc!=null){try{vlc.release();}catch(RuntimeException ignored){}vlc=null;}
     }

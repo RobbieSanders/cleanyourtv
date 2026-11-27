@@ -31,3 +31,6 @@ Numeric PIN/verification fields use an in-app keypad. Dashboard hides decoder di
 
 ## Recording research branch
 This build adds an opt-in read-only schema report from existing authenticated system inventory. It outputs field names/types and explicit recording-related booleans, not raw JSON, URLs, credentials, IDs or footage. No new network endpoint, stream recording, security changes or playback implementation. Compare supported camera schemas against the older indoor camera. Branch is independent of v0.8 main.
+
+## v0.10 diagnostic
+Single view waits for old surfaces to release, labels current quality, retries in both directions and attempts software decode on later retries. Where LibVLC provides displayed-picture statistics, automatic recovery checks frame progress and remembers successful quality per camera. Audio remains opt-in. No claim of verified on-device recovery or historical playback.
