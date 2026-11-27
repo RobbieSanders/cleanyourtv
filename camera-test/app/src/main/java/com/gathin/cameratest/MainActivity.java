@@ -27,6 +27,13 @@ public final class MainActivity extends Activity {
     private static final int OVERLAY_PERMISSION=201;
     private int gridPage=0, selectedIndex=0;
     private boolean authForm=false, primaryAdded=false, controlsHidden=false;
+    private final List<EditText> numericFields=new ArrayList<>();
+    private EditText numericTarget;
+    private boolean keypadAdded=false;
+    private int singleFocus=0;
+    private boolean confirmDown=false;
+    private TextView audioStatus;
+    private int testRequest=0;
     private LinearLayout singleBar;
     private TextView singleHeading;
     private VivintClient.Camera activeCamera;
@@ -160,7 +167,7 @@ public final class MainActivity extends Activity {
         return d;
     }
     private void page(String title,String detail,boolean scroll){
-        authForm=false;primaryAdded=false;
+        authForm=false;primaryAdded=false;numericFields.clear();numericTarget=null;keypadAdded=false;
         root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff233b51,BG,0xff0b141e}));
         root.setPadding(dp(26),dp(12),dp(26),dp(12));
@@ -181,10 +188,10 @@ public final class MainActivity extends Activity {
         d.setCornerRadius(dp(22));d.setStroke(dp(1),0xff4b657c);return d;
     }
     private void authPage(String title,String detail,String stage){
-        authForm=true;primaryAdded=false;
+        authForm=true;primaryAdded=false;numericFields.clear();numericTarget=null;keypadAdded=false;
         LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.HORIZONTAL);shell.setGravity(Gravity.CENTER_VERTICAL);
-        shell.setPadding(dp(34),dp(18),dp(34),dp(18));
-        shell.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff314b63,0xff142332,0xff0a121d}));
+        shell.setPadding(dp(30),dp(10),dp(30),dp(10));
+        shell.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff213648,0xff101c2a,0xff090f18}));
         LinearLayout brand=new LinearLayout(this);brand.setOrientation(LinearLayout.VERTICAL);brand.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,-1,0.86f);bp.rightMargin=dp(28);shell.addView(brand,bp);
         ImageView mark=new ImageView(this);mark.setImageResource(R.drawable.ic_security);
@@ -227,6 +234,14 @@ public final class MainActivity extends Activity {
         e.setSaveEnabled(false);e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         e.setTextSize(16);e.setBackground(inputBackground());e.setPadding(dp(13),0,dp(13),0);
         e.setSelectAllOnFocus(false);e.setTypeface(android.graphics.Typeface.create("sans-serif",0));
+        if(authForm&&(type&InputType.TYPE_MASK_CLASS)==InputType.TYPE_CLASS_NUMBER){
+            e.setShowSoftInputOnFocus(false);
+            e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(hint.toLowerCase(Locale.ROOT).contains("verification")?10:6)});
+            e.setLetterSpacing(.2f);numericFields.add(e);
+            if(numericTarget==null)numericTarget=e;
+            e.setOnFocusChangeListener((view,hasFocus)->{if(hasFocus)numericTarget=e;});
+            e.setOnClickListener(view->{numericTarget=e;});
+        }
         LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(-1,dp(46));ep.topMargin=dp(7);
         root.addView(e,ep);return e;
     }
@@ -235,8 +250,42 @@ public final class MainActivity extends Activity {
         b.setBackground(focusBackground());b.setFocusable(true);b.setPadding(dp(10),dp(4),dp(10),dp(4));
         b.setOnClickListener(v->action.run());return b;
     }
+    private void appendDigit(String digit){
+        EditText e=numericTarget;
+        if(e==null)return;
+        if("Clear".equals(digit)){e.setText("");return;}
+        if("⌫".equals(digit)){int n=e.length();if(n>0)e.getText().delete(n-1,n);return;}
+        if("Next".equals(digit)){
+            int i=numericFields.indexOf(e);
+            if(i+1<numericFields.size()){numericTarget=numericFields.get(i+1);numericTarget.requestFocus();}
+            return;
+        }
+        e.append(digit);
+        if(e.length()==6&&numericFields.size()>1){
+            int i=numericFields.indexOf(e);if(i+1<numericFields.size())numericTarget=numericFields.get(i+1);
+        }
+    }
+    private void addKeypad(){
+        if(keypadAdded||numericFields.isEmpty())return;
+        keypadAdded=true;
+        String[][] keys={{"1","2","3","⌫"},{"4","5","6","Clear"},{"7","8","9","0"}};
+        for(String[] line:keys){
+            LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,dp(34));rp.topMargin=dp(4);root.addView(row,rp);
+            for(String key:line){
+                Button k=makeButton(key,()->appendDigit(key));k.setTextSize(16);k.setMinHeight(0);k.setMinimumHeight(0);
+                LinearLayout.LayoutParams kp=new LinearLayout.LayoutParams(0,-1,1);kp.setMargins(dp(2),0,dp(2),0);row.addView(k,kp);
+            }
+        }
+    }
+    private void hideKeyboard(){
+        View focus=getCurrentFocus();
+        if(focus!=null){android.view.inputmethod.InputMethodManager im=getSystemService(android.view.inputmethod.InputMethodManager.class);
+            if(im!=null)im.hideSoftInputFromWindow(focus.getWindowToken(),0);}
+    }
     private Button button(String label,Runnable action){
-        Button b=makeButton(label,action);
+        if(authForm&&!primaryAdded)addKeypad();
+        Button b=makeButton(label,()->{hideKeyboard();action.run();});
         if(authForm&&!primaryAdded){
             primaryAdded=true;b.setBackground(primaryBackground());b.setTextColor(0xff102031);b.setTextSize(16);
         }
@@ -468,8 +517,7 @@ public final class MainActivity extends Activity {
                 open.setId(View.generateViewId());open.setGravity(Gravity.CENTER_VERTICAL|Gravity.START);
                 open.setSingleLine(true);open.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 tile.addView(open,new LinearLayout.LayoutParams(-1,dp(36)));
-                TextView caption=text("Connecting…",11,MUTED);caption.setPadding(dp(8),dp(2),0,0);caption.setSingleLine(true);
-                tile.addView(caption);
+                TextView caption=text("",11,MUTED);caption.setVisibility(View.GONE);caption.setSingleLine(true);
                 tileButtons.add(open);
                 frame.setFocusable(false);frame.setClickable(true);frame.setOnClickListener(view->openFromGrid(index));
                 open.setOnFocusChangeListener((view,focused)->{
@@ -483,7 +531,7 @@ public final class MainActivity extends Activity {
         }
         for(int i=0;i<tileButtons.size();i++){
             Button b=tileButtons.get(i);
-            if(i%2==0&&i+1<tileButtons.size())b.setNextFocusRightId(tileButtons.get(i+1).getId());
+            if(columns==2&&i%2==0&&i+1<tileButtons.size())b.setNextFocusRightId(tileButtons.get(i+1).getId());
             if(i%2==1)b.setNextFocusLeftId(tileButtons.get(i-1).getId());
             if(i+2<tileButtons.size())b.setNextFocusDownId(tileButtons.get(i+2).getId());
             if(i>=2)b.setNextFocusUpId(tileButtons.get(i-2).getId());
@@ -534,71 +582,88 @@ public final class MainActivity extends Activity {
         });
     }
     private void leaveSingle(){
-        if(SystemClock.uptimeMillis()<ignoreConfirmUntil)return;
         if("list".equals(singleReturn))showList();else showGrid();
     }
-    private void showSingle(VivintClient.Camera camera,boolean hd){showSingle(camera,hd,false);}
+    private void showSingle(VivintClient.Camera camera,boolean hd){singleFocus=0;showSingle(camera,hd,false);}
     private void showSingle(VivintClient.Camera camera,boolean hd,boolean audio){
-        if(!unlocked("single",camera.name,(hd?"HD":"SD")+"  ·  Live local camera"+(audio?"  ·  Audio enabled":""),false))return;
+        if(!unlocked("single",camera.name,"Live camera",false))return;
         activeCamera=camera;activeHd=hd;activeAudio=audio;controlsHidden=false;
-        ignoreConfirmUntil=SystemClock.uptimeMillis()+550;
+        ignoreConfirmUntil=SystemClock.uptimeMillis()+250;
         LinearLayout bar=toolbar();singleBar=bar;
-        Button back=tool(bar,"‹ Cameras",this::leaveSingle);back.setId(View.generateViewId());
-        tool(bar,hd?"Switch to SD":"Switch to HD",()->{
-            if(SystemClock.uptimeMillis()>=ignoreConfirmUntil)showSingle(camera,!hd,audio);
-        });
-        tool(bar,"‹ Previous",()->stepCamera(-1));
-        tool(bar,"Next ›",()->stepCamera(1));
-        tool(bar,audio?"Mute":"Audio",()->{
-            if(SystemClock.uptimeMillis()>=ignoreConfirmUntil)showSingle(camera,hd,!audio);
-        });
-        tool(bar,"Full screen",()->hideControls.run());
+        Button back=tool(bar,"‹ Cameras",this::leaveSingle);
+        tool(bar,"‹ Previous",()->{singleFocus=1;stepCamera(-1);});
+        tool(bar,"Next ›",()->{singleFocus=2;stepCamera(1);});
+        tool(bar,hd?"HD":"SD",()->{singleFocus=3;showSingle(camera,!activeHd,activeAudio);});
+        tool(bar,audio?"Mute":"Audio",()->{singleFocus=4;showSingle(camera,activeHd,!activeAudio);});
+        tool(bar,"Full screen",()->{singleFocus=5;hideControls.run();});
+        audioStatus=status;
         FrameLayout frame=new FrameLayout(this);
         frame.setBackgroundColor(Color.BLACK);frame.setFocusable(true);frame.setFocusableInTouchMode(true);frame.setId(View.generateViewId());
         frame.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        frame.setNextFocusUpId(back.getId());back.setNextFocusDownId(frame.getId());
-        frame.setContentDescription(camera.name+" live video. Press Up for controls or Back to return.");
-        frame.setOnKeyListener((view,key,event)->{
-            if(event.getAction()!=KeyEvent.ACTION_UP)return key==KeyEvent.KEYCODE_DPAD_LEFT||key==KeyEvent.KEYCODE_DPAD_RIGHT||key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER;
-            if(key==KeyEvent.KEYCODE_DPAD_LEFT){stepCamera(-1);return true;}
-            if(key==KeyEvent.KEYCODE_DPAD_RIGHT){stepCamera(1);return true;}
-            if(key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER||key==KeyEvent.KEYCODE_NUMPAD_ENTER||key==KeyEvent.KEYCODE_DPAD_UP){
-                revealControls();return true;
-            }
-            return false;
-        });
+        frame.setContentDescription(camera.name+" live video. Left and right switch cameras; Up or OK shows controls.");
         VLCVideoLayout layout=new VLCVideoLayout(this);layout.setFocusable(false);layout.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         frame.addView(layout,new FrameLayout.LayoutParams(-1,-1));
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,0,1);p.topMargin=dp(9);root.addView(frame,p);
-        singleCanvas=frame;frame.requestFocus();singleHeading=status;
-        ui.removeCallbacks(hideControls);ui.postDelayed(hideControls,7000);
+        singleCanvas=frame;singleHeading=status;
+        for(int i=0;i<bar.getChildCount();i++){
+            View child=bar.getChildAt(i);child.setId(View.generateViewId());
+            final int index=i;
+            child.setOnFocusChangeListener((v,focused)->{if(focused)singleFocus=index;});
+        }
+        for(int i=0;i<bar.getChildCount();i++){
+            View child=bar.getChildAt(i);
+            child.setNextFocusLeftId(bar.getChildAt((i+bar.getChildCount()-1)%bar.getChildCount()).getId());
+            child.setNextFocusRightId(bar.getChildAt((i+1)%bar.getChildCount()).getId());
+            child.setNextFocusDownId(frame.getId());
+        }
+        frame.setNextFocusUpId(bar.getChildAt(Math.min(singleFocus,bar.getChildCount()-1)).getId());
+        bar.getChildAt(Math.min(singleFocus,bar.getChildCount()-1)).requestFocus();
         final int id=videoGeneration;
         playback.postDelayed(()->{
             if(id==videoGeneration&&"single".equals(screen))start(camera,hd,layout,status,0,audio);
-        },250);
+        },100);
     }
     private void revealControls(){
         if(singleBar==null)return;
         singleBar.setVisibility(View.VISIBLE);controlsHidden=false;
-        if(singleBar.getChildCount()>0)singleBar.getChildAt(0).requestFocus();
-        ui.removeCallbacks(hideControls);ui.postDelayed(hideControls,7000);
+        if(singleBar.getChildCount()>0)singleBar.getChildAt(Math.min(singleFocus,singleBar.getChildCount()-1)).requestFocus();
     }
     private void stepCamera(int delta){
-        if(!"single".equals(screen)||activeCamera==null||SystemClock.uptimeMillis()<ignoreConfirmUntil||allCameras.isEmpty())return;
+        if(!"single".equals(screen)||activeCamera==null||allCameras.isEmpty())return;
         int index=allCameras.indexOf(activeCamera);
         int next=(Math.max(0,index)+delta+allCameras.size())%allCameras.size();
         VivintClient.Camera camera=allCameras.get(next);
         int visibleIndex=cameras.indexOf(camera);
         if(visibleIndex>=0){selectedIndex=visibleIndex;gridPage=visibleIndex/capacity();}
-        showSingle(camera,activeHd);
+        showSingle(camera,activeHd,false);
     }
     @Override public boolean dispatchKeyEvent(KeyEvent event){
         int code=event.getKeyCode();
-        if("single".equals(screen)&&event.getAction()==KeyEvent.ACTION_DOWN&&singleBar!=null&&!controlsHidden){
-            ui.removeCallbacks(hideControls);ui.postDelayed(hideControls,7000);
+        boolean confirm=code==KeyEvent.KEYCODE_DPAD_CENTER||code==KeyEvent.KEYCODE_ENTER||code==KeyEvent.KEYCODE_NUMPAD_ENTER;
+        if(confirm&&("single".equals(screen)||"grid".equals(screen))){
+            if(event.getAction()==KeyEvent.ACTION_DOWN){
+                if(event.getRepeatCount()>0)return true;
+                confirmDown=true;
+                return true;
+            }
+            if(event.getAction()==KeyEvent.ACTION_UP){
+                boolean valid=confirmDown;confirmDown=false;
+                if(!valid||event.isCanceled())return true;
+                View focus=getCurrentFocus();
+                if("single".equals(screen)&&focus==singleCanvas){revealControls();return true;}
+                if(focus!=null&&focus.isEnabled()&&focus.isClickable())focus.performClick();
+                return true;
+            }
         }
-        if("single".equals(screen)&&(code==KeyEvent.KEYCODE_DPAD_CENTER||code==KeyEvent.KEYCODE_ENTER||code==KeyEvent.KEYCODE_NUMPAD_ENTER)
-            &&(SystemClock.uptimeMillis()<ignoreConfirmUntil||event.getRepeatCount()>0))return true;
+        if("single".equals(screen)&&getCurrentFocus()==singleCanvas){
+            if(code==KeyEvent.KEYCODE_DPAD_LEFT||code==KeyEvent.KEYCODE_DPAD_RIGHT||code==KeyEvent.KEYCODE_DPAD_UP){
+                if(event.getAction()==KeyEvent.ACTION_UP){
+                    if(code==KeyEvent.KEYCODE_DPAD_UP)revealControls();
+                    else stepCamera(code==KeyEvent.KEYCODE_DPAD_LEFT?-1:1);
+                }
+                return true;
+            }
+        }
         return super.dispatchKeyEvent(event);
     }
     private VivintClient.Stream selectStream(VivintClient.Camera camera,boolean hd){
@@ -629,7 +694,7 @@ public final class MainActivity extends Activity {
             slot.close();players.remove(slot);
         }
         if(attempt>=1){
-            label.setText("Stream unavailable · Try Refresh or switch quality");return;
+            label.setText("Stream unavailable · Try Refresh or switch quality");label.setVisibility(View.VISIBLE);return;
         }
         boolean fallback=hd&&camera.streams.stream().anyMatch(s->s.label.startsWith("SD"));
         label.setText(fallback?"Reconnecting in SD…":"Reconnecting…");
@@ -649,7 +714,7 @@ public final class MainActivity extends Activity {
         try{
             if(vlc==null){
                 ArrayList<String> opts=new ArrayList<>();
-                opts.add("--quiet");if(!audio)opts.add("--no-audio");
+                opts.add("--quiet");
                 opts.add("--network-caching=1000");opts.add("--no-video-title-show");
                 vlc=new LibVLC(this,opts);
             }
@@ -661,7 +726,24 @@ public final class MainActivity extends Activity {
                 ui.post(()->{
                     if(id!=videoGeneration||slot.closed)return;
                     if(type==MediaPlayer.Event.Vout&&outputs>0){
-                        slot.output=true;label.setText(prefix+stream.label+" · Video output"+(audio?" · Audio enabled":""));
+                        slot.output=true;
+                        if("single".equals(screen))label.setText("Live"+(audio?" · Checking audio…":" · Muted"));
+                        else label.setVisibility(View.GONE);
+                    }
+                    if(audio&&(type==MediaPlayer.Event.Playing||type==MediaPlayer.Event.Vout)){
+                        playback.postDelayed(()->{
+                            if(id!=videoGeneration||slot.closed)return;
+                            try{
+                                int tracks=slot.player.getAudioTracksCount();
+                                if(tracks>0){
+                                    slot.player.setVolume(100);
+                                    int current=slot.player.getAudioTrack();
+                                    MediaPlayer.TrackDescription[] available=slot.player.getAudioTracks();
+                                    if(current<0&&available!=null)for(MediaPlayer.TrackDescription track:available)if(track.id>=0){slot.player.setAudioTrack(track.id);break;}
+                                    label.setText(slot.player.getAudioTrack()>=0?"Live · Audio on":"Live · Audio track could not be selected");
+                                }else label.setText("Live · No audio track reported by camera");
+                            }catch(RuntimeException e){label.setText("Live · Audio status unavailable");}
+                        },2500);
                     }
                     if(type==MediaPlayer.Event.EncounteredError||type==MediaPlayer.Event.EndReached)
                         reconnect(camera,hd,layout,label,attempt,audio,id,slot);
@@ -673,8 +755,10 @@ public final class MainActivity extends Activity {
                 media.addOption(":rtsp-tcp");media.addOption(":rtsp-user="+stream.username);
                 media.addOption(":rtsp-pwd="+stream.password);
                 if(!audio)media.addOption(":no-audio");
+                else media.addOption(":audio");
                 slot.player.setMedia(media);
             }finally{media.release();}
+            slot.player.setVolume(audio?100:0);
             slot.player.play();
             playback.postDelayed(()->{
                 if(id==videoGeneration&&!slot.closed&&!slot.output)
@@ -733,15 +817,26 @@ public final class MainActivity extends Activity {
         });
         root.addView(text("Alerts check recent authorized Vivint history about every 30 seconds while the TV is awake. Only recognizable events matching the alarm-state filters are shown. A popup dismisses itself in 10 seconds; View requires the PIN.",14,MUTED));
         button("Overlay permission settings",this::openOverlaySettings);
-        button("Test notification",()->{
-            if(!alerts.enabled()){status.setText("Enable camera alerts first.");return;}
-            if(allCameras.isEmpty()){status.setText("No available cameras.");return;}
-            AlertService.test(this,allCameras.get(0).name);
-            status.setText("Test notification requested. This is not a real security event.");
-        });
+        button("Test notification",this::testNotification);
+        root.addView(text("Overlay permission: "+(Settings.canDrawOverlays(this)?"Granted":"Not granted")+"  ·  System notifications: "+(getSystemService(android.app.NotificationManager.class).areNotificationsEnabled()?"Enabled":"Disabled"),13,MUTED));
         button("Return to cameras",this::showGrid);
         button("Forget session / Sign out",this::confirmSignOut);
         button("Lock",()->lock(""));
+    }
+    private void testNotification(){
+        if(allCameras.isEmpty()){status.setText("No available cameras.");return;}
+        final int request=++testRequest;
+        final String camera=allCameras.get(0).name;
+        getSharedPreferences("alert_diagnostics",MODE_PRIVATE).edit().putString("test","Starting test…").apply();
+        if(!AlertService.test(this,camera)){status.setText("Could not start notification service.");return;}
+        status.setText("Testing notification and overlay…");
+        for(int i=1;i<=5;i++){
+            ui.postDelayed(()->{
+                if(request!=testRequest||!"settings".equals(screen)||!visible)return;
+                String result=getSharedPreferences("alert_diagnostics",MODE_PRIVATE).getString("test","No result.");
+                status.setText(result);
+            },i*1000L);
+        }
     }
     private boolean overviewLoading=false;
     private void loadOverview(boolean force){
@@ -828,7 +923,7 @@ public final class MainActivity extends Activity {
         button("Cancel",()->{if(!busy)showSettings();});old.requestFocus();
     }
     @Override public void onBackPressed(){
-        if("single".equals(screen)){if(controlsHidden){revealControls();return;}leaveSingle();return;}
+        if("single".equals(screen)){leaveSingle();return;}
         if("list".equals(screen)||"settings".equals(screen)||"activity".equals(screen)||"manage".equals(screen)){showGrid();return;}
         if("changePin".equals(screen)){if(!busy)showSettings();return;}
         if("refresh".equals(screen)){generation++;busy=false;showGrid();return;}

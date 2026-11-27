@@ -17,9 +17,12 @@ public final class AlertService extends Service {
     private static final String STATUS_CHANNEL="security_status",ALERT_CHANNEL="security_events";
     private static final String DISMISS="com.gathin.cameratest.DISMISS",TEST="com.gathin.cameratest.TEST";
     private final Map<String,Long> cooldown=new HashMap<>();
-    static void test(Context c,String camera){
+    static boolean test(Context c,String camera){
         Intent i=new Intent(c,AlertService.class).setAction(TEST).putExtra("camera",camera);
-        try{c.startForegroundService(i);}catch(RuntimeException ignored){}
+        try{c.startForegroundService(i);return true;}catch(RuntimeException ignored){return false;}
+    }
+    private void diagnostic(String result){
+        getSharedPreferences("alert_diagnostics",MODE_PRIVATE).edit().putString("test",result).apply();
     }
     private final Handler ui=new Handler(Looper.getMainLooper());
     private ScheduledExecutorService worker;
@@ -72,18 +75,23 @@ public final class AlertService extends Service {
             if(worker==null)stopSelf();
             return START_NOT_STICKY;
         }
-        if(!options.enabled()||!vault.exists()){stopSelf();return START_NOT_STICKY;}
-        startForeground(RUNNING,status("Monitoring selected camera events"));
-        if(worker==null){
+        boolean test=i!=null&&TEST.equals(i.getAction());
+        if(!vault.exists()||(!options.enabled()&&!test)){if(test)diagnostic("Sign in to Home Security before testing.");stopSelf();return START_NOT_STICKY;}
+        try{startForeground(RUNNING,status(test?"Testing notification":"Monitoring selected camera events"));}
+        catch(RuntimeException e){if(test)diagnostic("Foreground service failed: "+e.getClass().getSimpleName());stopSelf();return START_NOT_STICKY;}
+        if(options.enabled()&&worker==null){
             started=System.currentTimeMillis();running=true;
             worker=Executors.newSingleThreadScheduledExecutor();
             worker.scheduleWithFixedDelay(this::poll,0,30,TimeUnit.SECONDS);
         }
-        if(i!=null&&TEST.equals(i.getAction())&&awake()){
+        if(test){
             String camera=i.getStringExtra("camera");
-            if(camera!=null)showEvent(new VivintClient.Alert("test",camera,"Test notification","Demo",System.currentTimeMillis()));
+            if(camera==null){diagnostic("No test camera supplied.");}
+            else if(!MainActivity.visible&&!awake()){diagnostic("TV is not interactive.");}
+            else showEvent(new VivintClient.Alert("test",camera,"Test notification","Demo",System.currentTimeMillis()));
+            if(!options.enabled())ui.postDelayed(()->{if(!options.enabled())stopSelf();},12000);
         }
-        return START_STICKY;
+        return options.enabled()?START_STICKY:START_NOT_STICKY;
     }
     private boolean awake(){
         PowerManager power=getSystemService(PowerManager.class);
@@ -118,19 +126,29 @@ public final class AlertService extends Service {
         }
     }
     private void showEvent(VivintClient.Alert a){
-        PendingIntent dismiss=PendingIntent.getService(this,102,new Intent(this,AlertService.class).setAction(DISMISS),
-            PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        Notification n=new Notification.Builder(this,ALERT_CHANNEL)
-            .setSmallIcon(R.drawable.ic_security).setContentTitle("Home Security: "+a.kind)
-            .setContentText(a.camera+" · "+a.arm).setContentIntent(open(a.camera))
-            .addAction(new Notification.Action.Builder(null,"View",open(a.camera)).build())
-            .addAction(new Notification.Action.Builder(null,"Dismiss",dismiss).build())
-            .setTimeoutAfter(10000).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build();
-        nm().notify(EVENT,n);
-        if(options.get("overlay",false)&&Settings.canDrawOverlays(this))showOverlay(a);
+        boolean test="test".equals(a.key);
+        boolean granted=Settings.canDrawOverlays(this);
+        boolean overlayShown=false;
+        if(granted&&(test||options.get("overlay",false)))overlayShown=showOverlay(a);
+        boolean posted=false;
+        String error="";
+        try{
+            PendingIntent dismiss=PendingIntent.getService(this,102,new Intent(this,AlertService.class).setAction(DISMISS),
+                PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+            Notification n=new Notification.Builder(this,ALERT_CHANNEL)
+                .setSmallIcon(R.drawable.ic_security).setContentTitle("Home Security: "+a.kind)
+                .setContentText(a.camera+" · "+a.arm).setContentIntent(open(a.camera))
+                .addAction(new Notification.Action.Builder(null,"View",open(a.camera)).build())
+                .addAction(new Notification.Action.Builder(null,"Dismiss",dismiss).build())
+                .setTimeoutAfter(10000).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build();
+            if(nm().areNotificationsEnabled()){nm().notify(EVENT,n);posted=true;}
+        }catch(RuntimeException e){error=" · "+e.getClass().getSimpleName();}
+        if(test)diagnostic((overlayShown?"Overlay window added":granted?"Overlay window failed":"Overlay permission not granted")
+            +" · "+(posted?"System notification submitted":"System notification not submitted")+error
+            +" · A submitted window may still be hidden by TV firmware.");
     }
     private int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
-    private void showOverlay(VivintClient.Alert a){
+    private boolean showOverlay(VivintClient.Alert a){
         hideOverlay();
         try{
             LinearLayout box=new LinearLayout(this){
@@ -156,7 +174,8 @@ public final class AlertService extends Service {
             p.gravity=Gravity.TOP|Gravity.RIGHT;p.x=dp(24);p.y=dp(24);
             windows.addView(box,p);overlay=box;no.requestFocus();
             expiry=()->{hideOverlay();nm().cancel(EVENT);};ui.postDelayed(expiry,10000);
-        }catch(RuntimeException e){hideOverlay();}
+            return true;
+        }catch(RuntimeException e){hideOverlay();return false;}
     }
     private void hideOverlay(){
         if(expiry!=null){ui.removeCallbacks(expiry);expiry=null;}
