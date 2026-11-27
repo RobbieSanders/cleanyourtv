@@ -367,50 +367,59 @@ final class VivintClient {
         for(java.util.Map.Entry<String,String> e:fields.entrySet()){if(b.length()>0)b.append(", ");b.append(e.getKey()).append(":").append(e.getValue());}
         return b.length()==0?"(none)":b.toString();
     }
+    private static String recordingValue(JSONObject camera,String key){
+        Object value=camera.opt(key);
+        if(value instanceof Boolean)return value.toString();
+        if(value instanceof Number){double n=((Number)value).doubleValue();return Double.isFinite(n)&&n>=0&&n<=1000000000000000d?value.toString():"Unavailable";}
+        if(value instanceof String){
+            String v=((String)value).trim();
+            // Status enum strings only; never include arbitrary text or network addresses.
+            if(("edge_dvr_recording_status".equals(key)||"sd_card_status".equals(key))&&v.matches("[A-Za-z][A-Za-z_ -]{0,39}"))return v;
+            if("sd_card_capacity_bytes".equals(key)&&v.matches("[0-9]{1,15}"))return v;
+        }
+        return "Not reported";
+    }
     String recordingDiagnostics()throws Exception{
         JSONObject account=get(API+"/authuser",true);
         JSONObject user=account.optJSONObject("u");
         JSONArray systems=user==null?null:user.optJSONArray("system");
         if(systems==null)throw new Exception("No compatible panels.");
-        StringBuilder out=new StringBuilder("Recording capability schema (read-only)\nNo account identifiers, URLs, tokens, passwords or footage included.\n");
+        StringBuilder out=new StringBuilder("Recording capability (read-only)\nNo credentials, addresses, IDs or footage.\n");
         int total=0;
+        String[][] fields={
+            {"uses_dvr","DVR enabled"},
+            {"edge_dvr_recording_status","Edge recording status"},
+            {"sd_card_stored_video_days","Stored video days"},
+            {"sd_card_status","Storage status"},
+            {"sd_card_remaining_life_percentage","Storage life (%)"},
+            {"sd_dvr_camera_record_percentage","Recording percentage"},
+            {"sd_dvr_playback_service_is_provisioned","Playback provisioned"},
+            {"sd_dvr_playback_service_is_running","Playback running"}
+        };
         for(int i=0;i<systems.length();i++){
             JSONObject entry=systems.optJSONObject(i);if(entry==null)continue;
             String panel=entry.optString("panid","");if(!panel.matches("[0-9]+"))continue;
             JSONObject sys=get(API+"/systems/"+panel+"?includerules=false",true).optJSONObject("system");
             if(sys==null)continue;
-            out.append("\nSystem ").append(i+1).append(" fields: ").append(schema(sys)).append("\n");
             JSONArray services=sys.optJSONArray("srvs");
+            boolean smartDrive=false;
             if(services!=null)for(int j=0;j<services.length();j++){
-                JSONObject service=services.optJSONObject(j);if(service==null)continue;
-                String type=service.optString("t","");
-                // Only expose the known public Smart Drive service name; other types stay redacted.
-                out.append("Service ").append(j+1).append(" ").append("SPMO_DVR".equals(type)?"SPMO_DVR":"other").append(": ").append(schema(service)).append("\n");
+                JSONObject service=services.optJSONObject(j);
+                if(service!=null&&"SPMO_DVR".equals(service.optString("t")))smartDrive=true;
             }
-            JSONArray partitions=sys.optJSONArray("par");
-            if(partitions==null)continue;
+            out.append("\nSystem ").append(i+1).append(" - Smart Drive reported: ").append(smartDrive?"Yes":"No").append("\n");
+            JSONArray partitions=sys.optJSONArray("par");if(partitions==null)continue;
             for(int j=0;j<partitions.length();j++){
                 JSONObject part=partitions.optJSONObject(j);if(part==null)continue;
                 JSONArray devices=part.optJSONArray("d");if(devices==null)continue;
                 for(int k=0;k<devices.length();k++){
-                    JSONObject dev=devices.optJSONObject(k);
-                    if(dev==null||!(dev.has("ciu")||dev.has("cius")))continue;
+                    JSONObject dev=devices.optJSONObject(k);if(dev==null||!(dev.has("ciu")||dev.has("cius")))continue;
                     total++;
                     String name=dev.optString("n","").toLowerCase(Locale.ROOT);
                     String label;
                     switch(name){case "driveway":label="Driveway";break;case "doorbell":label="Doorbell";break;case "backyard":label="Backyard";break;case "living room":label="Living Room";break;default:label="Camera "+total;}
-                    out.append("\n").append(label).append(": ").append(schema(dev)).append("\n");
-                    JSONObject features=dev.optJSONObject("fea");
-                    if(features!=null)out.append("Feature fields: ").append(schema(features)).append("\n");
-                    JSONArray capabilities=dev.optJSONArray("ca");
-                    if(capabilities!=null){
-                        int count=0;
-                        for(int q=0;q<capabilities.length()&&count<12;q++){
-                            JSONObject cap=capabilities.optJSONObject(q);
-                            if(cap!=null){out.append("Capability ").append(++count).append(": ").append(schema(cap)).append("\n");}
-                        }
-                    }
-                    if(out.length()>24000)return out.substring(0,24000)+"\nReport truncated.";
+                    out.append("\n").append(label).append("\n");
+                    for(String[] field:fields)out.append(field[1]).append(": ").append(recordingValue(dev,field[0])).append("\n");
                 }
             }
         }
