@@ -56,8 +56,24 @@ final class VivintClient {
 
     static final class Camera {
         final String name;
-        final String url;
-        Camera(String name, String url) { this.name = name; this.url = url; }
+        final List<Stream> streams;
+        Camera(String name, List<Stream> streams) { this.name = name; this.streams = streams; }
+    }
+    static final class Stream {
+        final String label, address, username, password;
+        Stream(String label,String address,String username,String password){
+            this.label=label;this.address=address;this.username=username;this.password=password;
+        }
+        String media3Url() throws Exception {
+            URI u=URI.create(address);
+            String auth=enc(username).replace("+","%20")+":"+enc(password).replace("+","%20");
+            return "rtsp://"+auth+"@"+u.getRawAuthority()+
+                (u.getRawPath()==null?"":u.getRawPath())+(u.getRawQuery()==null?"":"?"+u.getRawQuery());
+        }
+        String endpoint(){
+            URI u=URI.create(address);
+            return u.getHost()+":"+(u.getPort()==-1?554:u.getPort());
+        }
     }
     private static String enc(String s) throws Exception {
         return URLEncoder.encode(s, "UTF-8");
@@ -246,23 +262,33 @@ final class VivintClient {
         } catch(Exception e){ return false; }
         return x[0]==10 || (x[0]==172 && x[1]>=16 && x[1]<=31) || (x[0]==192 && x[1]==168);
     }
-    private static String stream(JSONObject camera,JSONObject credentials) {
-        if(camera.optBoolean("cpri",false)) return null;
+    private static List<Stream> streams(JSONObject camera,JSONObject credentials) {
+        List<Stream> result=new ArrayList<>();
+        if(camera.optBoolean("cpri",false)) return result;
+        String user=credentials.optString("n",""),pass=credentials.optString("pswd","");
+        if(user.isEmpty()||pass.isEmpty())return result;
+        Set<String> seen=new HashSet<>();
         for(String key:new String[]{"cius","ciu"}) {
             JSONArray a=camera.optJSONArray(key);
-            if(a==null || a.length()==0) continue;
-            try {
-                URI raw=URI.create(a.getString(0));
-                String user=credentials.optString("n",""), pass=credentials.optString("pswd","");
-                if(!"rtsp".equalsIgnoreCase(raw.getScheme()) || !privateIpv4(raw.getHost()) ||
-                    user.isEmpty() || pass.isEmpty() || raw.getUserInfo()!=null) continue;
-                String auth=enc(user).replace("+","%20")+":"+enc(pass).replace("+","%20");
-                String path=raw.getRawPath()==null?"":raw.getRawPath();
-                return "rtsp://"+auth+"@"+raw.getHost()+(raw.getPort()==-1?"":":"+raw.getPort())+
-                    path+(raw.getRawQuery()==null?"":"?"+raw.getRawQuery());
-            } catch(Exception ignored) {}
+            if(a==null)continue;
+            String label=key.equals("cius")?"SD":"HD";
+            for(int i=0;i<a.length();i++){
+                try{
+                    URI raw=URI.create(a.getString(i));
+                    if(!"rtsp".equalsIgnoreCase(raw.getScheme())||!privateIpv4(raw.getHost())||
+                       raw.getUserInfo()!=null||raw.getFragment()!=null)continue;
+                    String address=raw.toString();
+                    int suffix=address.lastIndexOf(",audio=opus");
+                    if(suffix>=0 && suffix+11==address.length()){
+                        String clean=address.substring(0,suffix);
+                        if(seen.add(clean)) result.add(new Stream(label+" (without Opus option)",clean,user,pass));
+                    }
+                    if(seen.add(address))result.add(new Stream(label,address,user,pass));
+                    if(result.size()>=8)return result;
+                }catch(Exception ignored){}
+            }
         }
-        return null;
+        return result;
     }
     List<Camera> cameras() throws Exception {
         JSONObject account=get(API+"/authuser",true);
@@ -294,8 +320,8 @@ final class VivintClient {
                     found++;
                     if(d.optBoolean("cpri",false)) continue;
                     if(creds==null) creds=get(API+"/panel-login/"+panel,true);
-                    String url=stream(d,creds);
-                    if(url!=null) result.add(new Camera(d.optString("n","Camera "+found),url));
+                    List<Stream> available=streams(d,creds);
+                    if(!available.isEmpty()) result.add(new Camera(d.optString("n","Camera "+found),available));
                 }
             }
         }
