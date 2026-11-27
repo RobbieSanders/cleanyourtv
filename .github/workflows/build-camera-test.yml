@@ -16,6 +16,26 @@ jobs:
         with:
           packages: platforms;android-35 build-tools;35.0.0
       - uses: gradle/actions/setup-gradle@v4
+      - name: Restore private Home Security signing key
+        env:
+          HOME_SECURITY_SIGNING: ${{ secrets.HOME_SECURITY_SIGNING }}
+        run: |
+          python3 - <<'PY'
+          import os, json, base64
+          from pathlib import Path
+          raw = os.environ.get('HOME_SECURITY_SIGNING', '')
+          if not raw:
+              raise SystemExit('Missing HOME_SECURITY_SIGNING repository secret. See camera-test/README.md.')
+          bundle = json.loads(raw)
+          password = bundle['password']
+          print('::add-mask::' + password)
+          path = Path(os.environ['RUNNER_TEMP']) / 'home-security.p12'
+          path.write_bytes(base64.b64decode(bundle['keystore'], validate=True))
+          path.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('HOME_SECURITY_KEYSTORE=' + str(path) + '\n')
+              env.write('HOME_SECURITY_STORE_PASSWORD=' + password + '\n')
+          PY
       - name: Build independent camera test
         run: |
           chmod +x launcher/gradlew
@@ -26,3 +46,6 @@ jobs:
           path: camera-test/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/home-security.p12"

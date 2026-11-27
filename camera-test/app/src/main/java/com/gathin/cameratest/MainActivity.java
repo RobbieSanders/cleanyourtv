@@ -23,9 +23,22 @@ import java.util.concurrent.*;
 
 public final class MainActivity extends Activity {
     static volatile boolean visible=false;
-    private static final int BG=0xff090d15, PANEL=0xff151d2a, WHITE=0xfff5f8fc, MUTED=0xff9eaec3, ACCENT=0xff9bdfff;
+    private static final int BG=0xff101c2a, PANEL=0xff243445, WHITE=0xfff5f8fc, MUTED=0xffa8bdd0, ACCENT=0xffa3ddff;
     private static final int OVERLAY_PERMISSION=201;
     private int gridPage=0, selectedIndex=0;
+    private boolean authForm=false, primaryAdded=false, controlsHidden=false;
+    private LinearLayout singleBar;
+    private TextView singleHeading;
+    private VivintClient.Camera activeCamera;
+    private boolean activeHd=true;
+    private VivintClient.Overview overview;
+    private long overviewAt=0;
+    private final ArrayList<VivintClient.Camera> allCameras=new ArrayList<>();
+    private final Runnable hideControls=()->{
+        if("single".equals(screen)&&singleBar!=null&&singleCanvas!=null){
+            singleCanvas.requestFocus();singleBar.setVisibility(View.GONE);controlsHidden=true;
+        }
+    };
     private String singleReturn="grid";
     private long permissionTripUntil=0, ignoreConfirmUntil=0;
     private boolean permissionTrip=false;
@@ -108,7 +121,7 @@ public final class MainActivity extends Activity {
         if(unlockedScreen())resetIdle();
     }
     private boolean unlockedScreen(){
-        return sessionUntil>0&&("grid".equals(screen)||"single".equals(screen)||"list".equals(screen)||"settings".equals(screen)||"changePin".equals(screen)||"refresh".equals(screen));
+        return sessionUntil>0&&("grid".equals(screen)||"single".equals(screen)||"list".equals(screen)||"settings".equals(screen)||"changePin".equals(screen)||"refresh".equals(screen)||"activity".equals(screen)||"manage".equals(screen));
     }
     private void resetIdle(){
         ui.removeCallbacks(idle);
@@ -118,7 +131,7 @@ public final class MainActivity extends Activity {
     }
     private void invalidate(){
         generation++;busy=false;ui.removeCallbacks(idle);releaseAll();
-        cameras.clear();
+        cameras.clear();allCameras.clear();overview=null;overviewAt=0;
         if(pending!=null){pending.clear();pending=null;}
     }
     private void lock(String message){
@@ -147,8 +160,9 @@ public final class MainActivity extends Activity {
         return d;
     }
     private void page(String title,String detail,boolean scroll){
+        authForm=false;primaryAdded=false;
         root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff172332,BG,0xff0d131e}));
+        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff233b51,BG,0xff0b141e}));
         root.setPadding(dp(26),dp(12),dp(26),dp(12));
         if(scroll){ScrollView view=new ScrollView(this);view.setFillViewport(true);view.addView(root);setContentView(view);}
         else setContentView(root);
@@ -162,6 +176,46 @@ public final class MainActivity extends Activity {
         root.addView(headingRow);
         status=text(detail,13,MUTED);status.setPadding(0,dp(4),0,dp(8));root.addView(status);
     }
+    private GradientDrawable glass(){
+        GradientDrawable d=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff31475b,0xff233345,0xff1a2939});
+        d.setCornerRadius(dp(22));d.setStroke(dp(1),0xff4b657c);return d;
+    }
+    private void authPage(String title,String detail,String stage){
+        authForm=true;primaryAdded=false;
+        LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.HORIZONTAL);shell.setGravity(Gravity.CENTER_VERTICAL);
+        shell.setPadding(dp(34),dp(18),dp(34),dp(18));
+        shell.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff314b63,0xff142332,0xff0a121d}));
+        LinearLayout brand=new LinearLayout(this);brand.setOrientation(LinearLayout.VERTICAL);brand.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,-1,0.86f);bp.rightMargin=dp(28);shell.addView(brand,bp);
+        ImageView mark=new ImageView(this);mark.setImageResource(R.drawable.ic_security);
+        mark.setPadding(dp(10),dp(10),dp(10),dp(10));mark.setBackground(glass());
+        brand.addView(mark,new LinearLayout.LayoutParams(dp(64),dp(64)));
+        TextView word=text("Home\nSecurity",34,WHITE);word.setTypeface(android.graphics.Typeface.create("sans-serif-medium",0));word.setPadding(0,dp(14),0,0);brand.addView(word);
+        TextView tagline=text("YOUR HOME. ALWAYS IN VIEW.",11,ACCENT);tagline.setLetterSpacing(.13f);tagline.setPadding(0,dp(9),0,dp(12));brand.addView(tagline);
+        brand.addView(text("Private live cameras.\nProtected access.",15,MUTED));
+        TextView footer=text("●  Encrypted session  ·  Read-only access",11,ACCENT);footer.setPadding(0,dp(20),0,0);brand.addView(footer);
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(false);shell.addView(scroll,new LinearLayout.LayoutParams(0,-2,1.14f));
+        root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(23),dp(17),dp(23),dp(17));
+        root.setBackground(glass());scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
+        TextView step=text(stage.toUpperCase(Locale.ROOT),10,ACCENT);step.setLetterSpacing(.13f);root.addView(step);
+        TextView heading=text(title,27,WHITE);heading.setTypeface(android.graphics.Typeface.create("sans-serif-medium",0));heading.setPadding(0,dp(3),0,0);root.addView(heading);
+        status=text(detail,13,MUTED);status.setPadding(0,dp(5),0,dp(9));root.addView(status);
+        setContentView(shell);
+    }
+    private StateListDrawable inputBackground(){
+        StateListDrawable d=new StateListDrawable();
+        GradientDrawable focused=shape(0xff122233,ACCENT);focused.setStroke(dp(2),ACCENT);
+        d.addState(new int[]{android.R.attr.state_focused},focused);
+        d.addState(new int[]{},shape(0xff142435,0xff526a80));return d;
+    }
+    private StateListDrawable primaryBackground(){
+        StateListDrawable d=new StateListDrawable();
+        GradientDrawable focused=shape(0xffd8f3ff,0xffffffff);focused.setStroke(dp(2),0xffffffff);
+        d.addState(new int[]{android.R.attr.state_focused},focused);
+        d.addState(new int[]{android.R.attr.state_pressed},shape(0xff8cc5e9,ACCENT));
+        d.addState(new int[]{},shape(0xffb0ddf7,0xffb0ddf7));return d;
+    }
     private void section(String title){
         TextView t=text(title.toUpperCase(Locale.ROOT),12,ACCENT);
         t.setLetterSpacing(0.12f);t.setPadding(dp(5),dp(14),0,dp(4));root.addView(t);
@@ -171,7 +225,10 @@ public final class MainActivity extends Activity {
         e.setSingleLine(true);e.setInputType(type);
         e.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI|EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
         e.setSaveEnabled(false);e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
-        root.addView(e,new LinearLayout.LayoutParams(-1,dp(50)));return e;
+        e.setTextSize(16);e.setBackground(inputBackground());e.setPadding(dp(13),0,dp(13),0);
+        e.setSelectAllOnFocus(false);e.setTypeface(android.graphics.Typeface.create("sans-serif",0));
+        LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(-1,dp(46));ep.topMargin=dp(7);
+        root.addView(e,ep);return e;
     }
     private Button makeButton(String label,Runnable action){
         Button b=new Button(this);b.setText(label);b.setAllCaps(false);b.setTextSize(14);b.setTextColor(WHITE);b.setTypeface(android.graphics.Typeface.create("sans-serif-medium",0));
@@ -180,7 +237,10 @@ public final class MainActivity extends Activity {
     }
     private Button button(String label,Runnable action){
         Button b=makeButton(label,action);
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(46));p.topMargin=dp(6);root.addView(b,p);return b;
+        if(authForm&&!primaryAdded){
+            primaryAdded=true;b.setBackground(primaryBackground());b.setTextColor(0xff102031);b.setTextSize(16);
+        }
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(authForm?43:46));p.topMargin=dp(8);root.addView(b,p);return b;
     }
     private LinearLayout toolbar(){
         LinearLayout bar=new LinearLayout(this);bar.setOrientation(LinearLayout.HORIZONTAL);root.addView(bar,new LinearLayout.LayoutParams(-1,dp(44)));return bar;
@@ -190,10 +250,10 @@ public final class MainActivity extends Activity {
     }
     private void showLogin(String message){
         screen="login";busy=false;sessionUntil=0;
-        page("Home Security",message.isEmpty()?"Sign in to Vivint. A new full login is required at least every 30 days.":message,true);
+        authPage("Welcome home.",message.isEmpty()?"Sign in to your Vivint account.":"Sign-in · "+message,"Account access");
         EditText user=field("Vivint email",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         EditText pass=field("Vivint password",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        button("Sign in",()->{
+        button("Secure sign in  ›",()->{
             if(busy)return;
             String u=user.getText().toString().trim(),p=pass.getText().toString();
             if(u.isEmpty()||p.isEmpty()){status.setText("Enter your email and password.");return;}
@@ -220,7 +280,7 @@ public final class MainActivity extends Activity {
                 List<VivintClient.Camera> found=client.cameras();
                 ui.post(()->{
                     if(!current(g)){client.clear();return;}
-                    cameras=found;showEnrollment(client);
+                    setCameras(found);showEnrollment(client);
                 });
             }catch(Exception e){
                 client.clear();String error=safe(e);
@@ -230,7 +290,7 @@ public final class MainActivity extends Activity {
     }
     private void showMfa(VivintClient client){
         screen="mfa";busy=false;
-        page("Verify Vivint sign-in","Enter the code from your latest Vivint message.",true);
+        authPage("Verify your identity.","Enter the code from your latest Vivint message.","Two-step verification");
         EditText code=field("Verification code",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         button("Verify",()->{
             if(busy)return;
@@ -242,7 +302,7 @@ public final class MainActivity extends Activity {
     }
     private void showEnrollment(VivintClient client){
         screen="enroll";busy=false;
-        page("Protect your cameras","Choose a six-digit PIN. Vivint session tokens are encrypted on this TV; your password is not saved.",true);
+        authPage("Make it yours.","Choose a six-digit PIN. Your Vivint password will not be saved.","Protect your cameras");
         EditText pin=field("New six-digit PIN",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         EditText confirm=field("Confirm PIN",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         button("Activate 30-day session",()->{
@@ -272,9 +332,9 @@ public final class MainActivity extends Activity {
     }
     private void showPin(String message){
         screen="pin";busy=false;
-        page("Home Security",message.isEmpty()?"Enter your six-digit PIN to unlock live cameras.":message,true);
+        authPage("Welcome back.",message.isEmpty()?"Enter your six-digit PIN to unlock live cameras.":message,"Protected access");
         EditText pin=field("Security PIN",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        button("Unlock",()->{
+        button("Unlock cameras  ›",()->{
             if(busy)return;
             String value=pin.getText().toString();
             if(!value.matches("[0-9]{6}")){status.setText("Enter your six-digit PIN.");return;}
@@ -286,7 +346,7 @@ public final class MainActivity extends Activity {
                     List<VivintClient.Camera> found=vault.use(VivintClient::cameras);
                     ui.post(()->{
                         if(!current(g))return;
-                        cameras=found;sessionUntil=until;busy=false;
+                        setCameras(found);sessionUntil=until;busy=false;
                         if(alerts.enabled())AlertService.start(this);
                         openRequested();
                     });
@@ -310,9 +370,51 @@ public final class MainActivity extends Activity {
                 invalidate();sessionUntil=0;alerts.put("enabled",false);AlertService.stop(this);vault.clear();showLogin("Signed out.");
             }).show();
     }
+    private String cameraKey(VivintClient.Camera c){return c.key;}
+    private SharedPreferences cameraPrefs(){return getSharedPreferences("camera_layout",MODE_PRIVATE);}
+    private boolean hidden(VivintClient.Camera c){return cameraPrefs().getBoolean("hidden:"+cameraKey(c),false);}
+    private boolean favorite(VivintClient.Camera c){return cameraPrefs().getBoolean("favorite:"+cameraKey(c),false);}
+    private void setCameras(List<VivintClient.Camera> found){
+        allCameras.clear();allCameras.addAll(found);applyLayout();
+    }
+    private void applyLayout(){
+        allCameras.sort(Comparator.comparingInt((VivintClient.Camera c)->favorite(c)?0:1)
+            .thenComparingInt(c->cameraPrefs().getInt("order:"+cameraKey(c),Integer.MAX_VALUE)));
+        cameras=new ArrayList<>();
+        for(VivintClient.Camera c:allCameras)if(!hidden(c))cameras.add(c);
+    }
+    private int capacity(){
+        return cameraPrefs().getInt("layout",4)==1?1:4;
+    }
+    private void showManage(){
+        if(!unlocked("manage","Camera organization","Favorite cameras appear first. Hidden cameras remain available in All cameras.",true))return;
+        section("Dashboard layout");
+        LinearLayout layouts=toolbar();
+        tool(layouts,capacity()==1?"● Focus":"Focus",()->{cameraPrefs().edit().putInt("layout",1).apply();gridPage=0;showManage();});
+        tool(layouts,capacity()==4?"● Quad":"Quad",()->{cameraPrefs().edit().putInt("layout",4).apply();gridPage=0;showManage();});
+        section("Your cameras");
+        for(int i=0;i<allCameras.size();i++){
+            final int index=i;VivintClient.Camera camera=allCameras.get(i);
+            root.addView(text(camera.name,17,WHITE));
+            LinearLayout bar=toolbar();
+            tool(bar,favorite(camera)?"★ Favorite":"☆ Favorite",()->{cameraPrefs().edit().putBoolean("favorite:"+cameraKey(camera),!favorite(camera)).apply();applyLayout();showManage();});
+            tool(bar,hidden(camera)?"Show":"Hide",()->{cameraPrefs().edit().putBoolean("hidden:"+cameraKey(camera),!hidden(camera)).apply();applyLayout();showManage();});
+            Button up=tool(bar,"↑ Move",()->moveCamera(index,-1));up.setEnabled(i>0);
+            Button down=tool(bar,"↓ Move",()->moveCamera(index,1));down.setEnabled(i+1<allCameras.size());
+        }
+        button("Done",this::showGrid);
+    }
+    private void moveCamera(int index,int delta){
+        int other=index+delta;if(other<0||other>=allCameras.size())return;
+        if(favorite(allCameras.get(index))!=favorite(allCameras.get(other))){status.setText("Reorder within the same favorite group.");return;}
+        Collections.swap(allCameras,index,other);
+        SharedPreferences.Editor edit=cameraPrefs().edit();
+        for(int i=0;i<allCameras.size();i++)edit.putInt("order:"+cameraKey(allCameras.get(i)),i);
+        edit.apply();applyLayout();showManage();
+    }
     private void openRequested(){
         String requested=targetCamera;targetCamera=null;
-        if(requested!=null)for(VivintClient.Camera c:cameras)if(requested.equals(c.name)){showSingle(c,true);return;}
+        if(requested!=null)for(VivintClient.Camera c:allCameras)if(requested.equals(c.name)){singleReturn="grid";showSingle(c,true);return;}
         showGrid();
     }
     private boolean unlocked(String name,String title,String description,boolean scroll){
@@ -321,17 +423,18 @@ public final class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);resetIdle();
         return true;
     }
-    private int pages(){return Math.max(1,(cameras.size()+3)/4);}
+    private int pages(){return Math.max(1,(cameras.size()+capacity()-1)/capacity());}
     private void changePage(int delta){
         int next=gridPage+delta;if(next<0||next>=pages())return;
-        gridPage=next;selectedIndex=gridPage*4;showGrid();
+        gridPage=next;selectedIndex=gridPage*capacity();showGrid();
     }
     private void showGrid(){
         gridPage=Math.max(0,Math.min(gridPage,pages()-1));
-        if(!unlocked("grid","Home Security",cameras.size()+" cameras  ·  SD overview  ·  Page "+(gridPage+1)+" of "+pages(),false))return;
+        if(!unlocked("grid","Home Security",cameras.size()+" visible / "+allCameras.size()+" cameras  ·  "+(capacity()==1?"Focus":"SD overview")+"  ·  Page "+(gridPage+1)+" of "+pages()+(overview==null?"":"  ·  "+overview.arm+" (last checked)"),false))return;
         LinearLayout bar=toolbar();
         Button list=tool(bar,"All cameras",this::showList);
         tool(bar,"Refresh",this::refreshCameras);
+        tool(bar,"Activity",this::showActivity);
         tool(bar,"Settings",this::showSettings);
         tool(bar,"Lock",()->lock("Camera access locked."));
         if(pages()>1){
@@ -342,13 +445,15 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams gp=new LinearLayout.LayoutParams(-1,0,1);gp.topMargin=dp(9);root.addView(grid,gp);
         tileButtons.clear();
         final int id=videoGeneration;
-        for(int row=0;row<2;row++){
+        int columns=capacity()==1?1:2;
+        int rows=capacity()==1?1:2;
+        for(int row=0;row<rows;row++){
             LinearLayout line=new LinearLayout(this);line.setOrientation(LinearLayout.HORIZONTAL);
             grid.addView(line,new LinearLayout.LayoutParams(-1,0,1));
-            for(int col=0;col<2;col++){
-                int local=row*2+col,index=gridPage*4+local;
+            for(int col=0;col<columns;col++){
+                int local=row*columns+col,index=gridPage*capacity()+local;
                 LinearLayout tile=new LinearLayout(this);tile.setOrientation(LinearLayout.VERTICAL);tile.setPadding(dp(6),dp(5),dp(6),dp(6));
-                tile.setBackground(shape(0xff101823,0xff29394a));
+                tile.setBackground(glass());
                 LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,-1,1);tp.setMargins(dp(4),dp(4),dp(4),dp(4));line.addView(tile,tp);
                 if(index>=cameras.size()){
                     TextView empty=text("No additional camera",14,MUTED);empty.setGravity(Gravity.CENTER);
@@ -359,7 +464,7 @@ public final class MainActivity extends Activity {
                 tile.addView(frame,new LinearLayout.LayoutParams(-1,0,1));
                 VLCVideoLayout layout=new VLCVideoLayout(this);layout.setFocusable(false);layout.setFocusableInTouchMode(false);layout.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
                 frame.addView(layout,new FrameLayout.LayoutParams(-1,-1));
-                Button open=makeButton(camera.name+"   ›",()->openFromGrid(index));
+                Button open=makeButton((favorite(camera)?"★  ":"")+camera.name+"   ›",()->openFromGrid(index));
                 open.setId(View.generateViewId());open.setGravity(Gravity.CENTER_VERTICAL|Gravity.START);
                 open.setSingleLine(true);open.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 tile.addView(open,new LinearLayout.LayoutParams(-1,dp(36)));
@@ -385,21 +490,23 @@ public final class MainActivity extends Activity {
             else{if(list.getId()==View.NO_ID)list.setId(View.generateViewId());b.setNextFocusUpId(list.getId());}
         }
         if(!tileButtons.isEmpty()){
-            int focus=Math.max(0,Math.min(selectedIndex-gridPage*4,tileButtons.size()-1));tileButtons.get(focus).requestFocus();
+            int focus=Math.max(0,Math.min(selectedIndex-gridPage*capacity(),tileButtons.size()-1));tileButtons.get(focus).requestFocus();
         }else list.requestFocus();
+        loadOverview(false);
     }
     private void openFromGrid(int index){
         if(!"grid".equals(screen)||index<0||index>=cameras.size()||SystemClock.uptimeMillis()<ignoreConfirmUntil)return;
         selectedIndex=index;singleReturn="grid";showSingle(cameras.get(index),true);
     }
     private void showList(){
-        if(!unlocked("list","All cameras",cameras.size()+" available cameras  ·  Choose a camera to view live",true))return;
-        for(int i=0;i<cameras.size();i++){
-            final int index=i;VivintClient.Camera c=cameras.get(i);
-            button(c.name+"   ›",()->{
-                selectedIndex=index;gridPage=index/4;singleReturn="list";showSingle(c,true);
+        if(!unlocked("list","All cameras",allCameras.size()+" available cameras  ·  Choose a camera to view live",true))return;
+        for(VivintClient.Camera c:allCameras){
+            button((favorite(c)?"★  ":"")+c.name+(hidden(c)?"  ·  Hidden":"")+"   ›",()->{
+                int index=cameras.indexOf(c);if(index>=0){selectedIndex=index;gridPage=index/capacity();}
+                singleReturn="list";showSingle(c,true);
             });
         }
+        button("Organize cameras",this::showManage);
         button("Refresh cameras",this::refreshCameras);
         button("Camera dashboard",this::showGrid);button("Settings",this::showSettings);button("Lock",()->lock(""));
     }
@@ -412,7 +519,7 @@ public final class MainActivity extends Activity {
                 List<VivintClient.Camera> found=vault.use(VivintClient::cameras);
                 ui.post(()->{
                     if(!current(g)||!"refresh".equals(screen))return;
-                    cameras=found;gridPage=0;selectedIndex=0;busy=false;showGrid();
+                    setCameras(found);gridPage=0;selectedIndex=0;busy=false;showGrid();
                 });
             }catch(Exception e){
                 String error=safe(e);
@@ -432,33 +539,60 @@ public final class MainActivity extends Activity {
     }
     private void showSingle(VivintClient.Camera camera,boolean hd){
         if(!unlocked("single",camera.name,(hd?"HD":"SD")+"  ·  Live local camera",false))return;
+        activeCamera=camera;activeHd=hd;controlsHidden=false;
         ignoreConfirmUntil=SystemClock.uptimeMillis()+550;
-        LinearLayout bar=toolbar();
+        LinearLayout bar=toolbar();singleBar=bar;
         Button back=tool(bar,"‹ Cameras",this::leaveSingle);back.setId(View.generateViewId());
         tool(bar,hd?"Switch to SD":"Switch to HD",()->{
             if(SystemClock.uptimeMillis()>=ignoreConfirmUntil)showSingle(camera,!hd);
         });
-        tool(bar,"Lock",()->lock(""));
+        tool(bar,"‹ Previous",()->stepCamera(-1));
+        tool(bar,"Next ›",()->stepCamera(1));
+        tool(bar,"Full screen",()->hideControls.run());
         FrameLayout frame=new FrameLayout(this);
         frame.setBackgroundColor(Color.BLACK);frame.setFocusable(true);frame.setFocusableInTouchMode(true);frame.setId(View.generateViewId());
         frame.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         frame.setNextFocusUpId(back.getId());back.setNextFocusDownId(frame.getId());
         frame.setContentDescription(camera.name+" live video. Press Up for controls or Back to return.");
         frame.setOnKeyListener((view,key,event)->{
-            if(key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER||key==KeyEvent.KEYCODE_NUMPAD_ENTER)return true;
+            if(event.getAction()!=KeyEvent.ACTION_UP)return key==KeyEvent.KEYCODE_DPAD_LEFT||key==KeyEvent.KEYCODE_DPAD_RIGHT||key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER;
+            if(key==KeyEvent.KEYCODE_DPAD_LEFT){stepCamera(-1);return true;}
+            if(key==KeyEvent.KEYCODE_DPAD_RIGHT){stepCamera(1);return true;}
+            if(key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER||key==KeyEvent.KEYCODE_NUMPAD_ENTER||key==KeyEvent.KEYCODE_DPAD_UP){
+                revealControls();return true;
+            }
             return false;
         });
         VLCVideoLayout layout=new VLCVideoLayout(this);layout.setFocusable(false);layout.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         frame.addView(layout,new FrameLayout.LayoutParams(-1,-1));
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,0,1);p.topMargin=dp(9);root.addView(frame,p);
-        singleCanvas=frame;frame.requestFocus();
+        singleCanvas=frame;frame.requestFocus();singleHeading=status;
+        ui.removeCallbacks(hideControls);ui.postDelayed(hideControls,7000);
         final int id=videoGeneration;
         playback.postDelayed(()->{
             if(id==videoGeneration&&"single".equals(screen))start(camera,hd,layout,status);
         },250);
     }
+    private void revealControls(){
+        if(singleBar==null)return;
+        singleBar.setVisibility(View.VISIBLE);controlsHidden=false;
+        if(singleBar.getChildCount()>0)singleBar.getChildAt(0).requestFocus();
+        ui.removeCallbacks(hideControls);ui.postDelayed(hideControls,7000);
+    }
+    private void stepCamera(int delta){
+        if(!"single".equals(screen)||activeCamera==null||SystemClock.uptimeMillis()<ignoreConfirmUntil||allCameras.isEmpty())return;
+        int index=allCameras.indexOf(activeCamera);
+        int next=(Math.max(0,index)+delta+allCameras.size())%allCameras.size();
+        VivintClient.Camera camera=allCameras.get(next);
+        int visibleIndex=cameras.indexOf(camera);
+        if(visibleIndex>=0){selectedIndex=visibleIndex;gridPage=visibleIndex/capacity();}
+        showSingle(camera,activeHd);
+    }
     @Override public boolean dispatchKeyEvent(KeyEvent event){
         int code=event.getKeyCode();
+        if("single".equals(screen)&&event.getAction()==KeyEvent.ACTION_DOWN&&singleBar!=null&&!controlsHidden){
+            ui.removeCallbacks(hideControls);ui.postDelayed(hideControls,7000);
+        }
         if("single".equals(screen)&&(code==KeyEvent.KEYCODE_DPAD_CENTER||code==KeyEvent.KEYCODE_ENTER||code==KeyEvent.KEYCODE_NUMPAD_ENTER)
             &&(SystemClock.uptimeMillis()<ignoreConfirmUntil||event.getRepeatCount()>0))return true;
         return super.dispatchKeyEvent(event);
@@ -525,7 +659,8 @@ public final class MainActivity extends Activity {
         }
     }
     private void releaseAll(){
-        videoGeneration++;playback.removeCallbacksAndMessages(null);singleCanvas=null;tileButtons.clear();
+        videoGeneration++;playback.removeCallbacksAndMessages(null);ui.removeCallbacks(hideControls);
+        singleCanvas=null;singleBar=null;singleHeading=null;activeCamera=null;controlsHidden=false;tileButtons.clear();
         for(Slot s:players)s.close();players.clear();
         if(vlc!=null){try{vlc.release();}catch(RuntimeException ignored){}vlc=null;}
     }
@@ -545,8 +680,11 @@ public final class MainActivity extends Activity {
         toggle("Lock after five minutes of inactivity","idleLock",false,this::resetIdle);
         button("Lock now",()->lock("Camera access locked."));
         section("Camera management");
-        button("Refresh cameras ("+cameras.size()+" found)",this::refreshCameras);
+        button("Refresh cameras ("+allCameras.size()+" found)",this::refreshCameras);
+        button("Organize cameras / layout",this::showManage);
+        button("Recording compatibility",this::showRecordingStatus);
         section("Notifications");
+        toggle("Do not disturb","dnd",false,null);
         toggle("Enable camera alerts (experimental)","enabled",false,()->{
             if(alerts.enabled()){
                 if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){
@@ -568,12 +706,70 @@ public final class MainActivity extends Activity {
         });
         root.addView(text("Alerts check recent authorized Vivint history about every 30 seconds while the TV is awake. Only recognizable events matching the alarm-state filters are shown. A popup dismisses itself in 10 seconds; View requires the PIN.",14,MUTED));
         button("Overlay permission settings",this::openOverlaySettings);
+        button("Test notification",()->{
+            if(!alerts.enabled()){status.setText("Enable camera alerts first.");return;}
+            if(allCameras.isEmpty()){status.setText("No available cameras.");return;}
+            AlertService.test(this,allCameras.get(0).name);
+            status.setText("Test notification requested. This is not a real security event.");
+        });
         button("Return to cameras",this::showGrid);
         button("Forget session / Sign out",this::confirmSignOut);
         button("Lock",()->lock(""));
     }
+    private boolean overviewLoading=false;
+    private void loadOverview(boolean force){
+        if(overviewLoading||!unlockedScreen()||(!force&&overview!=null&&SystemClock.elapsedRealtime()-overviewAt<60000))return;
+        overviewLoading=true;int g=generation;
+        worker.execute(()->{
+            try{
+                VivintClient.Overview value=vault.use(VivintClient::overview);
+                ui.post(()->{
+                    overviewLoading=false;if(!current(g))return;
+                    overview=value;overviewAt=SystemClock.elapsedRealtime();
+                    if("grid".equals(screen))status.setText(cameras.size()+" visible / "+allCameras.size()+" cameras  ·  "+value.arm+" (last checked)  ·  Page "+(gridPage+1)+" of "+pages());
+                    if("activity".equals(screen))renderActivity();
+                });
+            }catch(Exception e){ui.post(()->{overviewLoading=false;if(current(g)&&"activity".equals(screen))status.setText("Recent activity could not be loaded. Try refresh.");});}
+        });
+    }
+    private void showActivity(){
+        if(!unlocked("activity","Recent activity","Read-only Vivint history · Select an event to view its camera live.",true))return;
+        renderActivity();loadOverview(true);
+    }
+    private void renderActivity(){
+        if(!"activity".equals(screen))return;
+        page("Recent activity",overview==null?"Loading activity…":overview.arm+"  ·  History as of "+android.text.format.DateFormat.format("h:mm a",System.currentTimeMillis()-(SystemClock.elapsedRealtime()-overviewAt)),true);
+        button("Refresh activity",()->loadOverview(true));
+        if(overview!=null){
+            if(overview.events.isEmpty())root.addView(text("No recent recognized camera or alarm events.",15,MUTED));
+            for(VivintClient.History event:overview.events){
+                String time=android.text.format.DateFormat.format("MMM d  ·  h:mm a",event.time).toString();
+                VivintClient.Camera match=null;
+                for(VivintClient.Camera camera:allCameras)if(camera.name.equalsIgnoreCase(event.camera)){match=camera;break;}
+                final VivintClient.Camera target=match;
+                if(target!=null)button(event.kind+"  ·  "+target.name+"  ·  "+time,()->{singleReturn="grid";showSingle(target,true);});
+                else{TextView row=text(event.kind+"  ·  "+time,15,MUTED);row.setPadding(dp(10),dp(10),0,dp(10));root.addView(row);}
+            }
+        }
+        button("Back to cameras",this::showGrid);
+    }
+    private void showRecordingStatus(){
+        if(busy)return;
+        busy=true;status.setText("Checking for a compatible Smart Drive…");int g=generation;
+        worker.execute(()->{
+            try{
+                VivintClient.Overview value=vault.use(VivintClient::overview);
+                ui.post(()->{
+                    if(!current(g)||!"settings".equals(screen))return;
+                    busy=false;overview=value;overviewAt=SystemClock.elapsedRealtime();
+                    status.setText(value.dvr?"Smart Drive service found. Secure recorded playback still requires implementation.":"No compatible Smart Drive service reported by Vivint. Live video is available.");
+                });
+            }catch(Exception e){ui.post(()->{if(current(g)&&"settings".equals(screen)){busy=false;status.setText("Recording compatibility could not be checked.");}});}
+        });
+    }
     private void showChangePin(){
         if(!unlocked("changePin","Change PIN","Verify your current PIN, then choose a new six-digit PIN. Your 30-day session stays unchanged.",true))return;
+        authPage("Change your PIN.","Your 30-day Vivint session will stay unchanged.","Protected access");
         EditText old=field("Current PIN",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         EditText next=field("New six-digit PIN",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         EditText confirm=field("Confirm new PIN",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
@@ -604,8 +800,8 @@ public final class MainActivity extends Activity {
         button("Cancel",()->{if(!busy)showSettings();});old.requestFocus();
     }
     @Override public void onBackPressed(){
-        if("single".equals(screen)){leaveSingle();return;}
-        if("list".equals(screen)||"settings".equals(screen)){showGrid();return;}
+        if("single".equals(screen)){if(controlsHidden){revealControls();return;}leaveSingle();return;}
+        if("list".equals(screen)||"settings".equals(screen)||"activity".equals(screen)||"manage".equals(screen)){showGrid();return;}
         if("changePin".equals(screen)){if(!busy)showSettings();return;}
         if("refresh".equals(screen)){generation++;busy=false;showGrid();return;}
         if("grid".equals(screen)){finish();return;}

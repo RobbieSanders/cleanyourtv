@@ -10,6 +10,7 @@ final class AlertPreferences {
     void put(String key,boolean value){prefs.edit().putBoolean(key,value).apply();}
     boolean enabled(){return get("enabled",false);}
     boolean matches(VivintClient.Alert a){
+        if(get("dnd",false))return false;
         return SecurityPolicy.permitted(a.kind,a.arm,get("stay",true),get("away",true),get("disarmed",false),
             get("linger",true),get("doorbell",true),get("motion",false));
     }

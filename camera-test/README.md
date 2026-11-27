@@ -17,3 +17,9 @@ Unit tests cover the fixed session lifetime, rollback guard and event/state filt
 
 ## v0.6
 Modern dark layout, explicit D-pad camera selection, guarded full-view transition, optional idle lock, permission-return handling, camera paging, manual refresh and Change PIN. Build and device navigation validation still required.
+
+## v0.7 Premium Glass
+TV-first split authentication layout, consistent blue glass surfaces, live camera switching, optional hidden controls, camera favorites/order/visibility and focus/quad modes, read-only alarm and recent history, DND, test notification, 90-second per-camera/event cooldown, and Smart Drive detection. History events open live video, not recordings. The actual Smart Drive recording transport requires its own authenticated TLS client and is not yet implemented. Six-stream layout is intentionally deferred until the TV can be tested. 
+
+## Permanent release signing
+Create the repository Actions secret HOME_SECURITY_SIGNING containing a JSON object with a base64 PKCS12 signing key (`keystore`) and its password (`password`). Alias must be home-security. Keep the private bundle offline, never commit it or print it. The workflow now refuses to build a release without this secret; it restores the key only on the runner and deletes it afterward. First installation requires removing the previous temporary-key APK once. Later builds with the same key and package can be installed with pm install -r, retaining app data. This key is separate from the launcher.

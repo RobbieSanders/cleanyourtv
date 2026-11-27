@@ -15,7 +15,12 @@ import java.util.concurrent.*;
 public final class AlertService extends Service {
     private static final int RUNNING=40,EVENT=41;
     private static final String STATUS_CHANNEL="security_status",ALERT_CHANNEL="security_events";
-    private static final String DISMISS="com.gathin.cameratest.DISMISS";
+    private static final String DISMISS="com.gathin.cameratest.DISMISS",TEST="com.gathin.cameratest.TEST";
+    private final Map<String,Long> cooldown=new HashMap<>();
+    static void test(Context c,String camera){
+        Intent i=new Intent(c,AlertService.class).setAction(TEST).putExtra("camera",camera);
+        try{c.startForegroundService(i);}catch(RuntimeException ignored){}
+    }
     private final Handler ui=new Handler(Looper.getMainLooper());
     private ScheduledExecutorService worker;
     private final Set<String> seen=new LinkedHashSet<>();
@@ -74,6 +79,10 @@ public final class AlertService extends Service {
             worker=Executors.newSingleThreadScheduledExecutor();
             worker.scheduleWithFixedDelay(this::poll,0,30,TimeUnit.SECONDS);
         }
+        if(i!=null&&TEST.equals(i.getAction())&&awake()){
+            String camera=i.getStringExtra("camera");
+            if(camera!=null)showEvent(new VivintClient.Alert("test",camera,"Test notification","Demo",System.currentTimeMillis()));
+        }
         return START_STICKY;
     }
     private boolean awake(){
@@ -91,12 +100,17 @@ public final class AlertService extends Service {
             VivintClient.Alert newest=null;
             for(VivintClient.Alert a:events){
                 if(!seen.add(a.key))continue;
-                if(a.time>=started && options.matches(a))newest=a;
+                if(a.time>=started && options.matches(a)){
+                    String key=a.camera+":"+a.kind;
+                    long last=cooldown.getOrDefault(key,0L);
+                    if(a.time-last>=90000L)newest=a;
+                }
             }
             while(seen.size()>300){Iterator<String> it=seen.iterator();it.next();it.remove();}
             if(newest!=null){
                 VivintClient.Alert event=newest;
-                ui.post(()->{if(running&&awake()&&options.enabled()&&vault.exists()&&!MainActivity.visible)showEvent(event);});
+                cooldown.put(event.camera+":"+event.kind,event.time);
+                ui.post(()->{if(running&&awake()&&options.enabled()&&!options.get("dnd",false)&&vault.exists()&&!MainActivity.visible)showEvent(event);});
             }
         }catch(Exception e){
             nextPollAllowed=System.currentTimeMillis()+120000L;

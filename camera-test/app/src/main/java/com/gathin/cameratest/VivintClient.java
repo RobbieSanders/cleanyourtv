@@ -56,9 +56,9 @@ final class VivintClient {
     private long accessUntil;
 
     static final class Camera {
-        final String name;
+        final String name,key;
         final List<Stream> streams;
-        Camera(String name, List<Stream> streams) { this.name = name; this.streams = streams; }
+        Camera(String name,String key,List<Stream> streams) { this.name=name;this.key=key;this.streams=streams; }
     }
     static final class Stream {
         final String label, address, username, password;
@@ -343,11 +343,62 @@ final class VivintClient {
                     if(d.optBoolean("cpri",false)) continue;
                     if(creds==null) creds=get(API+"/panel-login/"+panel,true);
                     List<Stream> available=streams(d,creds);
-                    if(!available.isEmpty()) result.add(new Camera(d.optString("n","Camera "+found),available));
+                    if(!available.isEmpty()) result.add(new Camera(d.optString("n","Camera "+found),panel+":"+d.optString("_id",String.valueOf(k)),available));
                 }
             }
         }
         if(result.isEmpty()) throw new Exception("No usable local streams returned. Camera privacy or account compatibility may be the cause.");
+        return result;
+    }
+    static final class History{
+        final String kind,camera;final long time;
+        History(String kind,String camera,long time){this.kind=kind;this.camera=camera;this.time=time;}
+    }
+    static final class Overview{
+        String arm="Unknown";boolean dvr;final List<History> events=new ArrayList<>();
+    }
+    Overview overview()throws Exception{
+        Overview result=new Overview();
+        JSONObject account=get(API+"/authuser",true),user=account.optJSONObject("u");
+        JSONArray systems=user==null?null:user.optJSONArray("system");
+        if(systems==null)throw new Exception("No compatible panels.");
+        Set<String> states=new HashSet<>();
+        for(int i=0;i<systems.length();i++){
+            JSONObject entry=systems.optJSONObject(i);if(entry==null)continue;
+            String panel=entry.optString("panid","");if(!panel.matches("[0-9]+"))continue;
+            JSONObject sys=get(API+"/systems/"+panel+"?includerules=false",true).optJSONObject("system");
+            if(sys==null)continue;
+            JSONArray services=sys.optJSONArray("srvs");
+            if(services!=null)for(int j=0;j<services.length();j++){
+                JSONObject service=services.optJSONObject(j);
+                if(service!=null&&"SPMO_DVR".equals(service.optString("t"))&&!service.optString("exid").isEmpty())result.dvr=true;
+            }
+            JSONArray partitions=sys.optJSONArray("par");
+            if(partitions!=null)for(int j=0;j<partitions.length();j++){
+                JSONObject partition=partitions.optJSONObject(j);if(partition!=null)states.add(SecurityPolicy.arm(partition.optInt("s",-1)));
+            }
+            JSONArray history=get(API+"/"+panel+"/1/history?lim=30",true).optJSONArray("his");
+            if(history==null)continue;
+            for(int j=0;j<history.length();j++){
+                JSONObject event=history.optJSONObject(j);if(event==null)continue;
+                long time;
+                try{time=java.time.OffsetDateTime.parse(event.optString("ts","")).toInstant().toEpochMilli();}catch(Exception e){continue;}
+                String icon=event.optString("icon",""),kind=SecurityPolicy.kind(icon,event.optString("me",""));
+                if(kind==null){
+                    if("armed_stay".equals(icon))kind="System armed stay";
+                    else if("armed_away".equals(icon))kind="System armed away";
+                    else if("disarmed".equals(icon))kind="System disarmed";
+                    else continue;
+                }
+                JSONObject ctx=event.optJSONObject("pnlctx");
+                String camera=event.optString("dn",ctx==null?"":ctx.optString("dn","")).trim();
+                result.events.add(new History(kind,camera,time));
+            }
+        }
+        if(states.size()==1)result.arm=states.iterator().next();
+        else if(states.size()>1)result.arm="Multiple alarm states";
+        result.events.sort((a,b)->Long.compare(b.time,a.time));
+        if(result.events.size()>30)result.events.subList(30,result.events.size()).clear();
         return result;
     }
     static final class Alert {
