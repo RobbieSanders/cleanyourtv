@@ -246,6 +246,9 @@ public final class MainActivity extends Activity {
         d.setCornerRadius(dp(14));d.setStroke(dp(1),0xff34485a);return d;
     }
     private void authPage(String title,String detail,String stage){
+        if("pin".equals(screen)||"settingsPin".equals(screen)||"changePin".equals(screen)||"enroll".equals(screen)||"mfa".equals(screen)){
+            numericAuthPage(title,detail,stage);return;
+        }
         authForm=true;primaryAdded=false;numericFields.clear();numericTarget=null;keypadAdded=false;
         LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.HORIZONTAL);shell.setGravity(Gravity.CENTER_VERTICAL);
         shell.setPadding(dp(30),dp(10),dp(30),dp(10));
@@ -267,6 +270,18 @@ public final class MainActivity extends Activity {
         TextView heading=text(title,27,WHITE);heading.setTypeface(android.graphics.Typeface.create("sans-serif-medium",0));heading.setPadding(0,dp(3),0,0);root.addView(heading);
         status=text(detail,13,MUTED);status.setPadding(0,dp(5),0,dp(9));root.addView(status);
         setContentView(shell);
+    }
+    private void numericAuthPage(String title,String detail,String stage){
+        page(title,stage,false);
+        authForm=true;primaryAdded=false;numericFields.clear();numericTarget=null;keypadAdded=false;
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.setVerticalScrollBarEnabled(false);
+        root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        LinearLayout center=new LinearLayout(this);center.setOrientation(LinearLayout.VERTICAL);center.setGravity(Gravity.CENTER_HORIZONTAL);
+        scroll.addView(center,new ScrollView.LayoutParams(-1,-2));
+        LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);form.setPadding(dp(16),dp(9),dp(16),dp(10));form.setBackground(glass());
+        int width=Math.min(dp(400),getResources().getDisplayMetrics().widthPixels-dp(52));
+        center.addView(form,new LinearLayout.LayoutParams(width,-2));root=form;
+        status=text(detail,13,MUTED);status.setPadding(0,0,0,dp(2));root.addView(status);
     }
     private StateListDrawable inputBackground(){
         StateListDrawable d=new StateListDrawable();
@@ -326,10 +341,10 @@ public final class MainActivity extends Activity {
     private void addKeypad(){
         if(keypadAdded||numericFields.isEmpty())return;
         keypadAdded=true;
-        String[][] keys={{"1","2","3","⌫"},{"4","5","6","Clear"},{"7","8","9","0"}};
+        String[][] keys={{"1","2","3"},{"4","5","6"},{"7","8","9"},{"Clear","0","⌫"}};
         for(String[] line:keys){
             LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,dp(34));rp.topMargin=dp(4);root.addView(row,rp);
+            LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,dp(32));rp.topMargin=dp(4);root.addView(row,rp);
             for(String key:line){
                 Button k=makeButton(key,()->appendDigit(key));k.setTextSize(16);k.setMinHeight(0);k.setMinimumHeight(0);
                 LinearLayout.LayoutParams kp=new LinearLayout.LayoutParams(0,-1,1);kp.setMargins(dp(2),0,dp(2),0);row.addView(k,kp);
@@ -624,16 +639,45 @@ public final class MainActivity extends Activity {
         selectedIndex=index;singleReturn="grid";VivintClient.Camera camera=cameras.get(index);showSingle(camera,preferredHd(camera));
     }
     private void showList(){
-        if(!unlocked("list","All cameras",allCameras.size()+" available cameras  ·  Choose a camera to view live",true))return;
-        for(VivintClient.Camera c:allCameras){
-            button((favorite(c)?"★  ":"")+c.name+(hidden(c)?"  ·  Hidden":"")+"   ›",()->{
-                int index=cameras.indexOf(c);if(index>=0){selectedIndex=index;gridPage=index/capacity();}
-                singleReturn="list";showSingle(c,preferredHd(c));
-            });
+        if(!unlocked("list","All cameras",allCameras.size()+" cameras · Select a camera to view live",false))return;
+        LinearLayout bar=toolbar();
+        Button back=tool(bar,"‹ Dashboard",this::showGrid);
+        tool(bar,"Refresh",this::refreshCameras);tool(bar,"Settings",this::showSettings);tool(bar,"Lock",()->lock("Camera access locked."));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);
+        LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,0,1);sp.topMargin=dp(10);root.addView(scroll,sp);
+        LinearLayout catalog=new LinearLayout(this);catalog.setOrientation(LinearLayout.VERTICAL);scroll.addView(catalog,new ScrollView.LayoutParams(-1,-2));
+        ArrayList<View> cards=new ArrayList<>();
+        for(int i=0;i<allCameras.size();i+=2){
+            LinearLayout row=new LinearLayout(this);catalog.addView(row,new LinearLayout.LayoutParams(-1,dp(104)));
+            for(int j=i;j<Math.min(i+2,allCameras.size());j++){
+                VivintClient.Camera c=allCameras.get(j);
+                LinearLayout tile=new LinearLayout(this);tile.setOrientation(LinearLayout.HORIZONTAL);tile.setGravity(Gravity.CENTER_VERTICAL);
+                tile.setPadding(dp(16),dp(10),dp(16),dp(10));tile.setBackground(focusBackground());
+                tile.setFocusable(true);tile.setClickable(true);tile.setId(View.generateViewId());tile.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,-1,1);cp.setMargins(dp(4),dp(4),dp(4),dp(4));row.addView(tile,cp);
+                ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.ic_security);icon.setPadding(dp(8),dp(8),dp(8),dp(8));icon.setBackground(glass());
+                LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(dp(48),dp(48));ip.rightMargin=dp(14);tile.addView(icon,ip);
+                LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);tile.addView(info,new LinearLayout.LayoutParams(0,-2,1));
+                TextView name=text((favorite(c)?"★  ":"")+c.name,19,WHITE);name.setSingleLine(true);name.setEllipsize(android.text.TextUtils.TruncateAt.END);info.addView(name);
+                info.addView(text(hidden(c)?"Hidden from dashboard · View live":"View live",12,MUTED));
+                tile.addView(text("›",25,ACCENT));tile.setContentDescription(c.name+" camera. View live.");
+                tile.setOnClickListener(view->{
+                    int index=cameras.indexOf(c);if(index>=0){selectedIndex=index;gridPage=index/capacity();}
+                    cameraPrefs().edit().putString("lastCamera",c.key).apply();singleReturn="list";showSingle(c,preferredHd(c));
+                });
+                cards.add(tile);
+            }
+            if(i+1>=allCameras.size())row.addView(new View(this),new LinearLayout.LayoutParams(0,-1,1));
         }
-        button("Organize cameras",()->{settingsCategory="Cameras";showSettings();});
-        button("Refresh cameras",this::refreshCameras);
-        button("Camera dashboard",this::showGrid);button("Settings",this::showSettings);button("Lock",()->lock(""));
+        back.setId(View.generateViewId());
+        for(int i=0;i<cards.size();i++){
+            View tile=cards.get(i);
+            if(i%2==0&&i+1<cards.size())tile.setNextFocusRightId(cards.get(i+1).getId());
+            if(i%2==1)tile.setNextFocusLeftId(cards.get(i-1).getId());
+            if(i+2<cards.size())tile.setNextFocusDownId(cards.get(i+2).getId());
+            tile.setNextFocusUpId(i>=2?cards.get(i-2).getId():back.getId());
+        }
+        if(!cards.isEmpty())cards.get(0).requestFocus();else back.requestFocus();
     }
     private void refreshCameras(){
         if(busy||!unlocked("refresh","Refreshing cameras","Checking your Vivint account for new cameras…",true))return;
@@ -689,8 +733,13 @@ public final class MainActivity extends Activity {
         frame.setContentDescription(camera.name+" live video. Left and right switch cameras; Up or OK shows controls.");
         VLCVideoLayout layout=new VLCVideoLayout(this);layout.setFocusable(false);layout.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         frame.addView(layout,new FrameLayout.LayoutParams(-1,-1));
-        FrameLayout.LayoutParams controls=new FrameLayout.LayoutParams(-1,dp(56),Gravity.BOTTOM);controls.setMargins(dp(12),0,dp(12),dp(12));frame.addView(bar,controls);
+        boolean floating=securityPrefs().getBoolean("floatingControls",false);
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,0,1);p.topMargin=dp(4);root.addView(frame,p);
+        if(floating){
+            FrameLayout.LayoutParams controls=new FrameLayout.LayoutParams(-1,dp(56),Gravity.BOTTOM);controls.setMargins(dp(12),0,dp(12),dp(12));frame.addView(bar,controls);
+        }else{
+            LinearLayout.LayoutParams controls=new LinearLayout.LayoutParams(-1,dp(50));controls.topMargin=dp(5);root.addView(bar,controls);
+        }
         singleCanvas=frame;singleHeading=status;
         for(int i=0;i<bar.getChildCount();i++){
             View child=bar.getChildAt(i);child.setId(View.generateViewId());
@@ -922,7 +971,7 @@ public final class MainActivity extends Activity {
     private void showSettings(){
         if(notificationOnly){finish();return;}
         if(settingsUntil<=SystemClock.elapsedRealtime()){verifySettings();return;}
-        if(!unlocked("settings","Settings","Home Security · Premium Glass",false))return;
+        if(!unlocked("settings","Settings","Manage your cameras, privacy and notifications",false))return;
         ui.removeCallbacks(settingsExpiry);ui.postDelayed(settingsExpiry,Math.max(1,settingsUntil-SystemClock.elapsedRealtime()));
         LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.HORIZONTAL);root.addView(shell,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout nav=new LinearLayout(this);nav.setOrientation(LinearLayout.VERTICAL);
@@ -945,7 +994,8 @@ public final class MainActivity extends Activity {
                 break;
             case "Appearance":
                 toggleSecurity("Keep screen awake on live cameras","keepAwake",true);
-                root.addView(text("Premium Glass · Deep blue / charcoal · High-contrast blue focus",14,MUTED));
+                toggleSecurity("Float controls over video","floatingControls",false);
+                root.addView(text("Off keeps controls below the footage. On overlays them on the picture. Hide controls expands the video.",14,MUTED));
                 break;
             case "Security":
                 root.addView(text("PIN mode: "+pinMode()+" · "+pinHours()+" hours",16,ACCENT));
@@ -981,9 +1031,39 @@ public final class MainActivity extends Activity {
                 long days=Math.max(1,(sessionUntil-System.currentTimeMillis()+86399999L)/86400000L);
                 root.addView(text("Full Vivint sign-in expires in "+days+" day(s).",16,ACCENT));
                 button("Forget session / Sign out",this::confirmSignOut);break;
-            default:root.addView(text("Home Security 0.11 · Premium Glass 2.0\nRead-only Vivint integration · Local live video · Encrypted session",15,MUTED));
+            default:renderAbout();
+
         }
         if(chosen!=null)chosen.requestFocus();
+    }
+    private void renderAbout(){
+        root.addView(text("Home Security · Version 0.12",22,WHITE));
+        section("Developer");
+        root.addView(text("RobbieSanders · Independent software developer\nA community project built for convenient viewing of authorized home cameras on Android TV.",15,MUTED));
+        root.addView(text("github.com/RobbieSanders/cleanyourtv",13,ACCENT));
+        section("Free & unofficial");
+        root.addView(text("Provided free of charge. This independent project is not affiliated with, endorsed by, or supported by Vivint or its affiliates. Vivint and other third-party names belong to their respective owners. Use only accounts and cameras you are authorized to access, and follow applicable laws, privacy obligations and service terms.",14,MUTED));
+        section("Safety & disclaimer");
+        root.addView(text("Experimental software provided AS IS and AS AVAILABLE, without warranties, including fitness for a particular purpose, reliability, availability or noninfringement. To the extent permitted by law, the authors and contributors disclaim liability for losses arising from use or inability to use this software. Nothing excludes liability that cannot lawfully be excluded. Do not rely on this app for emergency response, alarm monitoring, or critical security decisions. Use the official Vivint app and monitoring service. Alerts, playback availability and compatibility are not guaranteed.",14,MUTED));
+        section("Privacy");
+        root.addView(text("Your account and compatible camera inventory are retrieved from Vivint. Account session tokens are stored locally using Android Keystore encryption. Your Vivint password is not persisted. Live video uses local network streams; this app has no developer-operated analytics or video upload service. Camera names and layout preferences remain on your device. Anyone with authorized TV access may view cameras according to your PIN settings. Sign out to remove the stored session.",14,MUTED));
+        section("Open-source acknowledgments");
+        root.addView(text("CleanYourTV (Gathin) and vivintpy (Nathan Spencer), MIT. LibVLC (VideoLAN and contributors), LGPL; individual modules may carry additional licenses. OkHttp (Square and contributors), Apache 2.0. All third-party license rights remain intact.",14,MUTED));
+        button("License notices",this::showLicenses);
+    }
+    private void showLicenses(){
+        if(!"settings".equals(screen)||settingsUntil<=SystemClock.elapsedRealtime())return;
+        StringBuilder notice=new StringBuilder();
+        for(String name:new String[]{"PROJECT-MIT.txt","VIVINTPY-MIT.txt","LIBVLC-LGPL.txt","OKHTTP-APACHE.txt","THIRD-PARTY.txt"}){
+            try(java.io.InputStream input=getAssets().open("licenses/"+name)){
+                java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();byte[] buf=new byte[4096];int n;
+                while((n=input.read(buf))!=-1)output.write(buf,0,n);
+                notice.append(name).append("\n").append(output.toString("UTF-8")).append("\n\n");
+            }catch(Exception e){notice.append(name).append(": See source repository.\n");}
+        }
+        TextView detail=text(notice.toString(),12,WHITE);detail.setTextIsSelectable(false);detail.setPadding(dp(12),dp(8),dp(12),dp(8));
+        ScrollView scroll=new ScrollView(this);scroll.setFocusable(true);scroll.addView(detail);
+        protectedDialog=new android.app.AlertDialog.Builder(this).setTitle("License notices").setView(scroll).setPositiveButton("Close",null).show();
     }
     private void verifySettings(){
         if(sessionUntil<=System.currentTimeMillis()||viewUntil<=System.currentTimeMillis()){expireView();return;}
@@ -1005,7 +1085,7 @@ public final class MainActivity extends Activity {
     }
     private void toggleSecurity(String title,String key,boolean def){
         Switch s=new Switch(this);s.setText(title);s.setTextColor(WHITE);s.setTextSize(15);s.setPadding(dp(10),dp(3),dp(4),dp(3));s.setBackground(focusBackground());
-        s.setChecked(securityPrefs().getBoolean(key,def));s.setFocusable(true);s.setEnabled(!"strict".equals(pinMode())||"keepAwake".equals(key));
+        s.setChecked(securityPrefs().getBoolean(key,def));s.setFocusable(true);s.setEnabled(!"strict".equals(pinMode())||"keepAwake".equals(key)||"floatingControls".equals(key));
         root.addView(s,new LinearLayout.LayoutParams(-1,dp(46)));
         s.setOnCheckedChangeListener((view,on)->securityPrefs().edit().putBoolean(key,on).apply());
     }
