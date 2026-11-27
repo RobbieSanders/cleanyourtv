@@ -355,7 +355,7 @@ final class VivintClient {
         History(String kind,String camera,long time){this.kind=kind;this.camera=camera;this.time=time;}
     }
     static final class Overview{
-        String arm="Unknown";boolean dvr;final List<History> events=new ArrayList<>();
+        String arm="Unknown";boolean dvr,historyAvailable=true;final List<History> events=new ArrayList<>();
     }
     Overview overview()throws Exception{
         Overview result=new Overview();
@@ -377,8 +377,10 @@ final class VivintClient {
             if(partitions!=null)for(int j=0;j<partitions.length();j++){
                 JSONObject partition=partitions.optJSONObject(j);if(partition!=null)states.add(SecurityPolicy.arm(partition.optInt("s",-1)));
             }
-            JSONArray history=get(API+"/"+panel+"/1/history?lim=30",true).optJSONArray("his");
-            if(history==null)continue;
+            JSONArray history;
+            try{history=get(API+"/"+panel+"/1/history?lim=30",true).optJSONArray("his");}
+            catch(Exception e){result.historyAvailable=false;continue;}
+            if(history==null){result.historyAvailable=false;continue;}
             for(int j=0;j<history.length();j++){
                 JSONObject event=history.optJSONObject(j);if(event==null)continue;
                 long time;

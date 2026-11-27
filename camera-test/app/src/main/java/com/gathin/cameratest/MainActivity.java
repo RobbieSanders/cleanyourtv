@@ -30,13 +30,13 @@ public final class MainActivity extends Activity {
     private LinearLayout singleBar;
     private TextView singleHeading;
     private VivintClient.Camera activeCamera;
-    private boolean activeHd=true;
+    private boolean activeHd=true, activeAudio=false;
     private VivintClient.Overview overview;
     private long overviewAt=0;
     private final ArrayList<VivintClient.Camera> allCameras=new ArrayList<>();
     private final Runnable hideControls=()->{
-        if("single".equals(screen)&&singleBar!=null&&singleCanvas!=null){
-            singleCanvas.requestFocus();singleBar.setVisibility(View.GONE);controlsHidden=true;
+        if("single".equals(this.screen)&&singleBar!=null&&this.singleCanvas!=null){
+            this.singleCanvas.requestFocus();singleBar.setVisibility(View.GONE);controlsHidden=true;
         }
     };
     private String singleReturn="grid";
@@ -537,17 +537,21 @@ public final class MainActivity extends Activity {
         if(SystemClock.uptimeMillis()<ignoreConfirmUntil)return;
         if("list".equals(singleReturn))showList();else showGrid();
     }
-    private void showSingle(VivintClient.Camera camera,boolean hd){
-        if(!unlocked("single",camera.name,(hd?"HD":"SD")+"  ·  Live local camera",false))return;
-        activeCamera=camera;activeHd=hd;controlsHidden=false;
+    private void showSingle(VivintClient.Camera camera,boolean hd){showSingle(camera,hd,false);}
+    private void showSingle(VivintClient.Camera camera,boolean hd,boolean audio){
+        if(!unlocked("single",camera.name,(hd?"HD":"SD")+"  ·  Live local camera"+(audio?"  ·  Audio enabled":""),false))return;
+        activeCamera=camera;activeHd=hd;activeAudio=audio;controlsHidden=false;
         ignoreConfirmUntil=SystemClock.uptimeMillis()+550;
         LinearLayout bar=toolbar();singleBar=bar;
         Button back=tool(bar,"‹ Cameras",this::leaveSingle);back.setId(View.generateViewId());
         tool(bar,hd?"Switch to SD":"Switch to HD",()->{
-            if(SystemClock.uptimeMillis()>=ignoreConfirmUntil)showSingle(camera,!hd);
+            if(SystemClock.uptimeMillis()>=ignoreConfirmUntil)showSingle(camera,!hd,audio);
         });
         tool(bar,"‹ Previous",()->stepCamera(-1));
         tool(bar,"Next ›",()->stepCamera(1));
+        tool(bar,audio?"Mute":"Audio",()->{
+            if(SystemClock.uptimeMillis()>=ignoreConfirmUntil)showSingle(camera,hd,!audio);
+        });
         tool(bar,"Full screen",()->hideControls.run());
         FrameLayout frame=new FrameLayout(this);
         frame.setBackgroundColor(Color.BLACK);frame.setFocusable(true);frame.setFocusableInTouchMode(true);frame.setId(View.generateViewId());
@@ -570,7 +574,7 @@ public final class MainActivity extends Activity {
         ui.removeCallbacks(hideControls);ui.postDelayed(hideControls,7000);
         final int id=videoGeneration;
         playback.postDelayed(()->{
-            if(id==videoGeneration&&"single".equals(screen))start(camera,hd,layout,status);
+            if(id==videoGeneration&&"single".equals(screen))start(camera,hd,layout,status,0,audio);
         },250);
     }
     private void revealControls(){
@@ -616,6 +620,27 @@ public final class MainActivity extends Activity {
         }
     }
     private void start(VivintClient.Camera camera,boolean hd,VLCVideoLayout layout,TextView label){
+        start(camera,hd,layout,label,0,false);
+    }
+    private void reconnect(VivintClient.Camera camera,boolean hd,VLCVideoLayout layout,TextView label,int attempt,boolean audio,int id,Slot slot){
+        if(id!=videoGeneration)return;
+        if(slot!=null){
+            if(slot.closed)return;
+            slot.close();players.remove(slot);
+        }
+        if(attempt>=1){
+            label.setText("Stream unavailable · Try Refresh or switch quality");return;
+        }
+        boolean fallback=hd&&camera.streams.stream().anyMatch(s->s.label.startsWith("SD"));
+        label.setText(fallback?"Reconnecting in SD…":"Reconnecting…");
+        playback.postDelayed(()->{
+            if(id==videoGeneration&&!stopped&&unlockedScreen()){
+                if("single".equals(screen)&&fallback)activeHd=false;
+                start(camera,fallback?false:hd,layout,label,attempt+1,audio);
+            }
+        },1500);
+    }
+    private void start(VivintClient.Camera camera,boolean hd,VLCVideoLayout layout,TextView label,int attempt,boolean audio){
         VivintClient.Stream stream=selectStream(camera,hd);
         String prefix="single".equals(screen)?camera.name+" · ":"";
         if(stream==null){label.setText(prefix+"Unavailable");return;}
@@ -624,7 +649,8 @@ public final class MainActivity extends Activity {
         try{
             if(vlc==null){
                 ArrayList<String> opts=new ArrayList<>();
-                opts.add("--quiet");opts.add("--no-audio");opts.add("--network-caching=1000");opts.add("--no-video-title-show");
+                opts.add("--quiet");if(!audio)opts.add("--no-audio");
+                opts.add("--network-caching=1000");opts.add("--no-video-title-show");
                 vlc=new LibVLC(this,opts);
             }
             Slot slot=new Slot(new MediaPlayer(vlc));created=slot;players.add(slot);
@@ -634,33 +660,34 @@ public final class MainActivity extends Activity {
                 int outputs=type==MediaPlayer.Event.Vout?event.getVoutCount():0;
                 ui.post(()->{
                     if(id!=videoGeneration||slot.closed)return;
-                    if(type==MediaPlayer.Event.Vout&&outputs>0){slot.output=true;label.setText(prefix+stream.label+" · Live output");}
-                    if(type==MediaPlayer.Event.EncounteredError||type==MediaPlayer.Event.EndReached){
-                        label.setText(prefix+"Stream unavailable");slot.close();players.remove(slot);
+                    if(type==MediaPlayer.Event.Vout&&outputs>0){
+                        slot.output=true;label.setText(prefix+stream.label+" · Video output"+(audio?" · Audio enabled":""));
                     }
+                    if(type==MediaPlayer.Event.EncounteredError||type==MediaPlayer.Event.EndReached)
+                        reconnect(camera,hd,layout,label,attempt,audio,id,slot);
                 });
             });
             Media media=new Media(vlc,Uri.parse(stream.address));
             try{
                 media.setHWDecoderEnabled(true,false);
                 media.addOption(":rtsp-tcp");media.addOption(":rtsp-user="+stream.username);
-                media.addOption(":rtsp-pwd="+stream.password);media.addOption(":no-audio");
+                media.addOption(":rtsp-pwd="+stream.password);
+                if(!audio)media.addOption(":no-audio");
                 slot.player.setMedia(media);
             }finally{media.release();}
             slot.player.play();
             playback.postDelayed(()->{
-                if(id==videoGeneration&&!slot.closed&&!slot.output){
-                    label.setText(prefix+"No video · Try single view");slot.close();players.remove(slot);
-                }
+                if(id==videoGeneration&&!slot.closed&&!slot.output)
+                    reconnect(camera,hd,layout,label,attempt,audio,id,slot);
             },20000);
         }catch(Exception|LinkageError e){
             if(created!=null){created.close();players.remove(created);}
-            label.setText(prefix+"Playback unavailable");
+            reconnect(camera,hd,layout,label,attempt,audio,id,null);
         }
     }
     private void releaseAll(){
         videoGeneration++;playback.removeCallbacksAndMessages(null);ui.removeCallbacks(hideControls);
-        singleCanvas=null;singleBar=null;singleHeading=null;activeCamera=null;controlsHidden=false;tileButtons.clear();
+        singleCanvas=null;singleBar=null;singleHeading=null;activeCamera=null;activeAudio=false;controlsHidden=false;tileButtons.clear();
         for(Slot s:players)s.close();players.clear();
         if(vlc!=null){try{vlc.release();}catch(RuntimeException ignored){}vlc=null;}
     }
@@ -741,7 +768,8 @@ public final class MainActivity extends Activity {
         page("Recent activity",overview==null?"Loading activity…":overview.arm+"  ·  History as of "+android.text.format.DateFormat.format("h:mm a",System.currentTimeMillis()-(SystemClock.elapsedRealtime()-overviewAt)),true);
         button("Refresh activity",()->loadOverview(true));
         if(overview!=null){
-            if(overview.events.isEmpty())root.addView(text("No recent recognized camera or alarm events.",15,MUTED));
+            if(!overview.historyAvailable)root.addView(text("History unavailable for one or more panels. Refresh to try again.",15,MUTED));
+            else if(overview.events.isEmpty())root.addView(text("No recent recognized camera or alarm events.",15,MUTED));
             for(VivintClient.History event:overview.events){
                 String time=android.text.format.DateFormat.format("MMM d  ·  h:mm a",event.time).toString();
                 VivintClient.Camera match=null;

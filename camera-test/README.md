@@ -23,3 +23,5 @@ TV-first split authentication layout, consistent blue glass surfaces, live camer
 
 ## Permanent release signing
 Create the repository Actions secret HOME_SECURITY_SIGNING containing a JSON object with a base64 PKCS12 signing key (`keystore`) and its password (`password`). Alias must be home-security. Keep the private bundle offline, never commit it or print it. The workflow now refuses to build a release without this secret; it restores the key only on the runner and deletes it afterward. First installation requires removing the previous temporary-key APK once. Later builds with the same key and package can be installed with pm install -r, retaining app data. This key is separate from the launcher.
+
+Playback recovery retries a failed stream once, falls back from HD to SD when available, and never keeps retrying indefinitely. Single-camera audio is opt-in and may not be available from all cameras. Dashboard audio stays disabled. Controls auto-hide after seven seconds, with remote navigation to reveal them. These changes require on-TV testing.
