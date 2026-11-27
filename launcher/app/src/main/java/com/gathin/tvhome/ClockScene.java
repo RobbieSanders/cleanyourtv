@@ -54,6 +54,8 @@ final class ClockScene {
     private boolean glowOff;
     /** clock_wallpaper: the picture start() decodes, its darkening, and the resources to draw it with. */
     private File wallpaperFile;
+    private File shownWallpaperFile;
+    private WallpaperFraming framing;
     private int wallpaperShade;
     private Resources wallpaperRes;
     /** One number per decode request: a result whose number is no longer the current one is dropped. Main thread only. */
@@ -86,6 +88,10 @@ final class ClockScene {
         ambient.setBackground(glow);
         ambient.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
                 glow.setGradientRadius((r - l) * 0.55f));
+        ambient.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (framing != null && shownWallpaperFile != null
+                    && (r - l != or - ol || b - t != ob - ot)) framing.apply(ambient, shownWallpaperFile);
+        });
         colorIndex = random.nextInt(PALETTE.length);
         setGlow(PALETTE[colorIndex]);
     }
@@ -127,6 +133,7 @@ final class ClockScene {
         glowOff = !cfg.clockGlow;
         if (glowOff) ambient.setBackground(null);
         if (!cfg.clockWallpaper) return;
+        framing = cfg.wallpaperFraming;
         // What Home plays, and Config puts the single wallpaper in it when a theme has no collection.
         // Reading cfg.wallpaper first held the screensaver on wallpaper.jpg while Home rotated.
         if (cfg.wallpapers.isEmpty()) {
@@ -172,6 +179,8 @@ final class ClockScene {
                 ambient.setBackground(null);
                 ambient.setImageDrawable(new LayerDrawable(new Drawable[]{
                         new BitmapDrawable(res, bmp), new ColorDrawable(shade)}));
+                shownWallpaperFile = file;
+                if (framing != null) framing.apply(ambient, file);
             });
         }, "clock-wallpaper").start();
     }
