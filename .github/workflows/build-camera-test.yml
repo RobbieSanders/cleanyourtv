@@ -19,7 +19,7 @@ jobs:
       - name: Build independent camera test
         run: |
           chmod +x launcher/gradlew
-          launcher/gradlew -p camera-test --no-daemon assembleRelease
+          launcher/gradlew -p camera-test --no-daemon testReleaseUnitTest assembleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: Camera-Test-APK

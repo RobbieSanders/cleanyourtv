@@ -52,7 +52,8 @@ final class VivintClient {
         .cookieJar(cookies).followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).connectTimeout(15,TimeUnit.SECONDS)
         .readTimeout(20,TimeUnit.SECONDS).callTimeout(35,TimeUnit.SECONDS).build();
-    private String verifier, state, username, password, token, mfaType;
+    private String verifier, state, username, password, token, mfaType, refreshToken;
+    private long accessUntil;
 
     static final class Camera {
         final String name;
@@ -63,12 +64,6 @@ final class VivintClient {
         final String label, address, username, password;
         Stream(String label,String address,String username,String password){
             this.label=label;this.address=address;this.username=username;this.password=password;
-        }
-        String media3Url() throws Exception {
-            URI u=URI.create(address);
-            String auth=enc(username).replace("+","%20")+":"+enc(password).replace("+","%20");
-            return "rtsp://"+auth+"@"+u.getRawAuthority()+
-                (u.getRawPath()==null?"":u.getRawPath())+(u.getRawQuery()==null?"":"?"+u.getRawQuery());
         }
         String endpoint(){
             URI u=URI.create(address);
@@ -225,10 +220,37 @@ final class VivintClient {
         }
         if(response.has("mfa")) { mfaType="mfa"; return false; }
         JSONObject result=finish(response);
-        token=result.optString("access_token","");
-        if(token.isEmpty()) throw new Exception("Authentication response did not contain an access token.");
+        takeTokens(result,null);
         password=null; username=null; verifier=null; state=null; mfaType=null;
         return true;
+    }
+    private void takeTokens(JSONObject response,String previousRefresh) throws Exception {
+        token=response.optString("access_token","");
+        if(token.isEmpty())throw new Exception("Authentication response did not contain an access token.");
+        refreshToken=response.optString("refresh_token",previousRefresh==null?"":previousRefresh);
+        long now=System.currentTimeMillis();
+        long lifetime=response.optLong("expires_in",300);
+        accessUntil=now+Math.max(30,Math.min(lifetime,86400))*1000L;
+        try{
+            String id=response.optString("id_token","");
+            String[] parts=id.split("\\.");
+            if(parts.length==3){
+                JSONObject claims=new JSONObject(new String(Base64.decode(parts[1],Base64.URL_SAFE|Base64.NO_WRAP),StandardCharsets.UTF_8));
+                long exp=claims.optLong("exp",0)*1000L;
+                if(exp>0)accessUntil=Math.min(accessUntil,exp);
+            }
+        }catch(Exception ignored){}
+    }
+    void restore(String access,String refresh,long until){token=access;refreshToken=refresh;accessUntil=until;}
+    String access(){return token;}
+    String refresh(){return refreshToken;}
+    long accessUntil(){return accessUntil;}
+    void renew() throws Exception {
+        if(refreshToken==null||refreshToken.isEmpty())throw new Exception("Full sign-in required.");
+        String previous=refreshToken;
+        JSONObject response=request(ID+"/oauth2/token?client_id=ios",
+            query("grant_type","refresh_token","refresh_token",previous),"application/x-www-form-urlencoded",false);
+        takeTokens(response,previous);
     }
     boolean login(String user,String pass) throws Exception {
         username=user; password=pass;
@@ -279,7 +301,7 @@ final class VivintClient {
                        raw.getUserInfo()!=null||raw.getFragment()!=null)continue;
                     String address=raw.toString();
                     int suffix=address.lastIndexOf(",audio=opus");
-                    if(suffix>=0 && suffix+11==address.length()){
+                    if(suffix>=0 && suffix+",audio=opus".length()==address.length()){
                         String clean=address.substring(0,suffix);
                         if(seen.add(clean)) result.add(new Stream(label+" (without Opus option)",clean,user,pass));
                     }
@@ -326,11 +348,69 @@ final class VivintClient {
             }
         }
         if(result.isEmpty()) throw new Exception("No usable local streams returned. Camera privacy or account compatibility may be the cause.");
-        token=null; cookies.clear();
         return result;
     }
+    static final class Alert {
+        final String key,camera,kind,arm;
+        final long time;
+        Alert(String key,String camera,String kind,String arm,long time){
+            this.key=key;this.camera=camera;this.kind=kind;this.arm=arm;this.time=time;
+        }
+    }
+    List<Alert> alerts() throws Exception {
+        JSONObject account=get(API+"/authuser",true);
+        JSONObject user=account.optJSONObject("u");
+        JSONArray systems=user==null?null:user.optJSONArray("system");
+        if(systems==null)throw new Exception("No compatible panels.");
+        List<Alert> alerts=new ArrayList<>();
+        long now=System.currentTimeMillis();
+        for(int i=0;i<systems.length();i++){
+            JSONObject summary=systems.optJSONObject(i);
+            if(summary==null)continue;
+            String panel=summary.optString("panid","");
+            if(!panel.matches("[0-9]+"))continue;
+            JSONObject sys=get(API+"/systems/"+panel+"?includerules=false",true).optJSONObject("system");
+            JSONArray partitions=sys==null?null:sys.optJSONArray("par");
+            if(partitions==null)continue;
+            java.util.Map<String,String> names=new java.util.HashMap<>();
+            java.util.Map<String,String> arms=new java.util.HashMap<>();
+            for(int j=0;j<partitions.length();j++){
+                JSONObject partition=partitions.optJSONObject(j);
+                if(partition==null)continue;
+                String arm=SecurityPolicy.arm(partition.optInt("s",-1));
+                JSONArray devices=partition.optJSONArray("d");
+                if(devices==null)continue;
+                for(int k=0;k<devices.length();k++){
+                    JSONObject d=devices.optJSONObject(k);
+                    if(d==null||d.optBoolean("cpri",false)||!(d.has("ciu")||d.has("cius")))continue;
+                    String name=d.optString("n","").trim();
+                    if(!name.isEmpty()){names.put(name.toLowerCase(Locale.ROOT),name);arms.put(name.toLowerCase(Locale.ROOT),arm);}
+                }
+            }
+            JSONObject history=get(API+"/"+panel+"/1/history?lim=20",true);
+            JSONArray list=history.optJSONArray("his");
+            if(list==null)continue;
+            for(int j=0;j<list.length();j++){
+                JSONObject event=list.optJSONObject(j);
+                if(event==null)continue;
+                long time;
+                try{time=java.time.OffsetDateTime.parse(event.optString("ts","")).toInstant().toEpochMilli();}
+                catch(Exception e){continue;}
+                if(time>now+5000||now-time>90000)continue;
+                JSONObject ctx=event.optJSONObject("pnlctx");
+                String device=event.optString("dn",ctx==null?"":ctx.optString("dn","")).trim().toLowerCase(Locale.ROOT);
+                String name=names.get(device);
+                if(name==null)continue;
+                String kind=SecurityPolicy.kind(event.optString("icon",""),event.optString("me",""));
+                if(kind==null)continue;
+                alerts.add(new Alert(panel+":"+time+":"+device+":"+kind,name,kind,arms.get(device),time));
+            }
+        }
+        return alerts;
+    }
     void clear() {
-        token=null; username=null; password=null; verifier=null; state=null; mfaType=null;
+        http.dispatcher().cancelAll();
+        token=null; refreshToken=null; accessUntil=0; username=null; password=null; verifier=null; state=null; mfaType=null;
         cookies.clear();
     }
 }
