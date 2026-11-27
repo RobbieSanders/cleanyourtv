@@ -112,6 +112,20 @@ final class SessionVault {
             return d.getLong("issued")+SecurityPolicy.SESSION_MS;
         }
     }
+    long changePin(String oldPin,String newPin)throws Exception{
+        if(!newPin.matches("[0-9]{6}"))throw new Exception("Choose a six-digit PIN.");
+        synchronized(STORAGE){
+            long expires=checkPin(oldPin);
+            JSONObject data=current();
+            byte[] salt=new byte[24];RANDOM.nextBytes(salt);
+            byte[] verifier=hash(newPin,salt);
+            try{
+                data.put("salt",b64(salt)).put("pin",b64(verifier)).put("failed",0).put("lockedUntil",0);
+                write(data);
+            }finally{Arrays.fill(verifier,(byte)0);}
+            return expires;
+        }
+    }
     interface Operation<T>{T run(VivintClient c)throws Exception;}
     <T>T use(Operation<T> operation)throws Exception{
         synchronized(NETWORK){
