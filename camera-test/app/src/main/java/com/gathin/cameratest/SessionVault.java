@@ -124,12 +124,10 @@ final class SessionVault {
                 if(client.accessUntil()<=System.currentTimeMillis()+60000){
                     try{client.renew();}
                     catch(Exception e){
-                        String message=e.getMessage()==null?"":e.getMessage();
-                        if(message.contains("invalid_grant")||message.contains("HTTP 401")||message.contains("HTTP 403")){
-                            synchronized(STORAGE){if(exists()&&id.equals(current().optString("id")))clear();}
-                            throw new Exception("Vivint session expired. Sign in again.");
-                        }
-                        throw e;
+                        // Refresh tokens rotate. A lost response may mean the old token was consumed.
+                        // Do not replay an uncertain refresh and risk invalidating the new token.
+                        synchronized(STORAGE){if(exists()&&id.equals(current().optString("id")))clear();}
+                        throw new Exception("Vivint session renewal could not be confirmed. Sign in again.");
                     }
                     synchronized(STORAGE){
                         JSONObject fresh=current();

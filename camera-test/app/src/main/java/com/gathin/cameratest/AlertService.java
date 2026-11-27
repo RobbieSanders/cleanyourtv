@@ -20,6 +20,8 @@ public final class AlertService extends Service {
     private ScheduledExecutorService worker;
     private final Set<String> seen=new LinkedHashSet<>();
     private long started;
+    private volatile boolean running;
+    private long nextPollAllowed;
     private AlertPreferences options;
     private SessionVault vault;
     private WindowManager windows;
@@ -68,7 +70,7 @@ public final class AlertService extends Service {
         if(!options.enabled()||!vault.exists()){stopSelf();return START_NOT_STICKY;}
         startForeground(RUNNING,status("Monitoring selected camera events"));
         if(worker==null){
-            started=System.currentTimeMillis();
+            started=System.currentTimeMillis();running=true;
             worker=Executors.newSingleThreadScheduledExecutor();
             worker.scheduleWithFixedDelay(this::poll,0,30,TimeUnit.SECONDS);
         }
@@ -80,8 +82,9 @@ public final class AlertService extends Service {
         return power!=null&&power.isInteractive()&&(keyguard==null||!keyguard.isKeyguardLocked());
     }
     private void poll(){
+        if(!running)return;
         if(!options.enabled()||!vault.usable()){ui.post(this::stopSelf);return;}
-        if(!awake())return;
+        if(!awake()||System.currentTimeMillis()<nextPollAllowed)return;
         try{
             List<VivintClient.Alert> events=vault.use(VivintClient::alerts);
             events.sort(Comparator.comparingLong(a->a.time));
@@ -93,9 +96,10 @@ public final class AlertService extends Service {
             while(seen.size()>300){Iterator<String> it=seen.iterator();it.next();it.remove();}
             if(newest!=null){
                 VivintClient.Alert event=newest;
-                ui.post(()->{if(awake()&&options.enabled()&&vault.exists()&&!MainActivity.visible)showEvent(event);});
+                ui.post(()->{if(running&&awake()&&options.enabled()&&vault.exists()&&!MainActivity.visible)showEvent(event);});
             }
         }catch(Exception e){
+            nextPollAllowed=System.currentTimeMillis()+120000L;
             if(!vault.exists())ui.post(this::stopSelf);
         }
     }
@@ -145,6 +149,7 @@ public final class AlertService extends Service {
         if(overlay!=null){try{windows.removeView(overlay);}catch(RuntimeException ignored){}overlay=null;}
     }
     @Override public void onDestroy(){
+        running=false;
         if(worker!=null){worker.shutdownNow();worker=null;}
         hideOverlay();ui.removeCallbacksAndMessages(null);
         if(screenReceiver!=null)try{unregisterReceiver(screenReceiver);}catch(RuntimeException ignored){}

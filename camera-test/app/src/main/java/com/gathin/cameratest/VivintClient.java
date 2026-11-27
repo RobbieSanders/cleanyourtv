@@ -229,15 +229,15 @@ final class VivintClient {
         if(token.isEmpty())throw new Exception("Authentication response did not contain an access token.");
         refreshToken=response.optString("refresh_token",previousRefresh==null?"":previousRefresh);
         long now=System.currentTimeMillis();
-        long lifetime=response.optLong("expires_in",300);
-        accessUntil=now+Math.max(30,Math.min(lifetime,86400))*1000L;
+        long lifetime=response.optLong("expires_in",0);
+        accessUntil=now+Math.max(30,Math.min(lifetime>0?lifetime:300,86400))*1000L;
         try{
             String id=response.optString("id_token","");
             String[] parts=id.split("\\.");
             if(parts.length==3){
                 JSONObject claims=new JSONObject(new String(Base64.decode(parts[1],Base64.URL_SAFE|Base64.NO_WRAP),StandardCharsets.UTF_8));
                 long exp=claims.optLong("exp",0)*1000L;
-                if(exp>0)accessUntil=Math.min(accessUntil,exp);
+                if(exp>0)accessUntil=lifetime>0?Math.min(accessUntil,exp):Math.min(now+86400000L,exp);
             }
         }catch(Exception ignored){}
     }

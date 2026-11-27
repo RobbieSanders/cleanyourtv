@@ -65,7 +65,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onPause(){
         visible=false;
-        if(unlockedScreen())lock("Camera access locked.");
+        if(unlockedScreen()||busy||"mfa".equals(screen)||"enroll".equals(screen))lock("Camera access locked.");
         super.onPause();
     }
     @Override protected void onStop(){
@@ -102,7 +102,8 @@ public final class MainActivity extends Activity {
         if(!isFinishing()&&!isDestroyed())entry(message);
     }
     private void entry(String message){
-        if(vault.exists())showPin(message);else showLogin(message);
+        if(vault.exists()&&vault.usable())showPin(message);
+        else{AlertService.stop(this);showLogin(message);}
     }
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
     private TextView text(String content,int size,int color){
@@ -167,7 +168,7 @@ public final class MainActivity extends Activity {
     private String safe(Exception e){
         return e.getClass()==Exception.class&&e.getMessage()!=null?e.getMessage():"Network or device error ("+e.getClass().getSimpleName()+").";
     }
-    private boolean current(int g){return g==generation&&!isFinishing()&&!isDestroyed()&&!stopped;}
+    private boolean current(int g){return g==generation&&visible&&!isFinishing()&&!isDestroyed()&&!stopped;}
     private void runAuth(VivintClient client,AuthAction action){
         if(busy)return;
         busy=true;status.setText("Connecting securely to Vivint...");
