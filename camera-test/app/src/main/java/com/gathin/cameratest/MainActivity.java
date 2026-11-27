@@ -27,6 +27,26 @@ public final class MainActivity extends Activity {
     private static final int OVERLAY_PERMISSION=201;
     private int gridPage=0, selectedIndex=0;
     private boolean authForm=false, primaryAdded=false, controlsHidden=false;
+    private Button authPrimary;
+    private CharSequence authPrimaryLabel;
+    private ProgressBar authProgress;
+    private void authFeedback(String message,boolean working){
+        status.setText(message);
+        if(authProgress!=null)authProgress.setVisibility(working?View.VISIBLE:View.GONE);
+        if(authPrimary!=null){
+            authPrimary.setText(working?message:authPrimaryLabel);
+            authPrimary.setContentDescription(working?message:authPrimaryLabel);
+        }
+    }
+    private void resetAuthFeedback(){
+        authPrimary=null;authPrimaryLabel=null;authProgress=null;
+    }
+    private void addAuthProgress(){
+        authProgress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
+        authProgress.setIndeterminate(true);authProgress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(ACCENT));
+        authProgress.setVisibility(View.GONE);
+        root.addView(authProgress,new LinearLayout.LayoutParams(-1,dp(5)));
+    }
     private final List<EditText> numericFields=new ArrayList<>();
     private EditText numericTarget;
     private boolean keypadAdded=false;
@@ -194,7 +214,7 @@ public final class MainActivity extends Activity {
             notificationOnly=normal==0;
             viewUntil=normal>0?normal:Math.min(alert,System.currentTimeMillis()+SecurityPolicy.IDLE_MS);
             sessionUntil=vault.sessionEnd();screen="loading";busy=true;
-            page("Home Security","Opening your cameras…",false);
+            page("Home Security","Opening your cameras…",false);addAuthProgress();authProgress.setVisibility(View.VISIBLE);
             int gen=generation;
             worker.execute(()->{
                 try{List<VivintClient.Camera> found=vault.use(VivintClient::cameras);
@@ -225,7 +245,7 @@ public final class MainActivity extends Activity {
         return d;
     }
     private void page(String title,String detail,boolean scroll){
-        authForm=false;primaryAdded=false;numericFields.clear();numericTarget=null;keypadAdded=false;
+        resetAuthFeedback();authForm=false;primaryAdded=false;numericFields.clear();numericTarget=null;keypadAdded=false;
         root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff142333,BG,0xff080e16}));
         root.setPadding(dp(18),dp(8),dp(18),dp(8));
@@ -249,7 +269,7 @@ public final class MainActivity extends Activity {
         if("pin".equals(screen)||"settingsPin".equals(screen)||"changePin".equals(screen)||"enroll".equals(screen)||"mfa".equals(screen)){
             numericAuthPage(title,detail,stage);return;
         }
-        authForm=true;primaryAdded=false;numericFields.clear();numericTarget=null;keypadAdded=false;
+        resetAuthFeedback();authForm=true;primaryAdded=false;numericFields.clear();numericTarget=null;keypadAdded=false;
         LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.HORIZONTAL);shell.setGravity(Gravity.CENTER_VERTICAL);
         shell.setPadding(dp(30),dp(10),dp(30),dp(10));
         shell.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff213648,0xff101c2a,0xff090f18}));
@@ -268,7 +288,7 @@ public final class MainActivity extends Activity {
         root.setBackground(glass());scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
         TextView step=text(stage.toUpperCase(Locale.ROOT),10,ACCENT);step.setLetterSpacing(.13f);root.addView(step);
         TextView heading=text(title,27,WHITE);heading.setTypeface(android.graphics.Typeface.create("sans-serif-medium",0));heading.setPadding(0,dp(3),0,0);root.addView(heading);
-        status=text(detail,13,MUTED);status.setPadding(0,dp(5),0,dp(9));root.addView(status);
+        status=text(detail,13,MUTED);status.setPadding(0,dp(5),0,dp(9));root.addView(status);addAuthProgress();
         setContentView(shell);
     }
     private void numericAuthPage(String title,String detail,String stage){
@@ -281,7 +301,7 @@ public final class MainActivity extends Activity {
         LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);form.setPadding(dp(16),dp(9),dp(16),dp(10));form.setBackground(glass());
         int width=Math.min(dp(400),getResources().getDisplayMetrics().widthPixels-dp(52));
         center.addView(form,new LinearLayout.LayoutParams(width,-2));root=form;
-        status=text(detail,13,MUTED);status.setPadding(0,0,0,dp(2));root.addView(status);
+        status=text(detail,13,MUTED);status.setPadding(0,0,0,dp(2));root.addView(status);addAuthProgress();
     }
     private StateListDrawable inputBackground(){
         StateListDrawable d=new StateListDrawable();
@@ -361,6 +381,7 @@ public final class MainActivity extends Activity {
         Button b=makeButton(label,()->{hideKeyboard();action.run();});
         if(authForm&&!primaryAdded){
             primaryAdded=true;b.setBackground(primaryBackground());b.setTextColor(0xff102031);b.setTextSize(16);
+            authPrimary=b;authPrimaryLabel=label;
         }
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(authForm?43:46));p.topMargin=dp(8);root.addView(b,p);return b;
     }
@@ -392,7 +413,7 @@ public final class MainActivity extends Activity {
     private boolean current(int g){return g==generation&&visible&&!isFinishing()&&!isDestroyed()&&!stopped;}
     private void runAuth(VivintClient client,AuthAction action){
         if(busy)return;
-        busy=true;status.setText("Connecting securely to Vivint...");
+        busy=true;authFeedback("Connecting to Vivint…",true);
         final int g=generation;
         worker.execute(()->{
             try{
@@ -431,7 +452,7 @@ public final class MainActivity extends Activity {
             if(busy)return;
             String p=pin.getText().toString(),q=confirm.getText().toString();
             if(!p.matches("[0-9]{6}")||!p.equals(q)){status.setText("Enter matching six-digit PINs.");return;}
-            pin.setText("");confirm.setText("");busy=true;status.setText("Securing your session...");
+            pin.setText("");confirm.setText("");busy=true;authFeedback("Saving your PIN…",true);
             int g=generation;
             worker.execute(()->{
                 try{
@@ -460,11 +481,12 @@ public final class MainActivity extends Activity {
             if(busy)return;
             String value=pin.getText().toString();
             if(!value.matches("[0-9]{6}")){status.setText("Enter your six-digit PIN.");return;}
-            pin.setText("");busy=true;status.setText("Unlocking cameras...");
+            pin.setText("");busy=true;authFeedback("Checking PIN…",true);
             int g=generation;
             worker.execute(()->{
                 try{
                     long until=vault.checkPin(value);
+                    ui.post(()->{if(current(g)&&"pin".equals(screen))authFeedback("PIN accepted · Loading cameras…",true);});
                     List<VivintClient.Camera> found=vault.use(VivintClient::cameras);
                     ui.post(()->{
                         if(!current(g))return;
@@ -998,12 +1020,15 @@ public final class MainActivity extends Activity {
                 root.addView(text("Off keeps controls below the footage. On overlays them on the picture. Hide controls expands the video.",14,MUTED));
                 break;
             case "Security":
-                root.addView(text("PIN mode: "+pinMode()+" · "+pinHours()+" hours",16,ACCENT));
-                button("Change PIN protection mode",this::chooseMode);
-                button("Remember authorization duration",this::chooseDuration);
-                toggleSecurity("Open notification cameras without PIN","notification",true);
-                toggleSecurity("Require PIN after TV sleep","sleep",false);
-                toggle("Lock after five minutes of inactivity","idleLock",false,this::resetIdle);
+                String mode=pinMode();
+                String summary="strict".equals(mode)?"Ask for PIN every time":"convenience".equals(mode)?"No PIN for live cameras":"Remember my PIN for "+pinDurationLabel();
+                root.addView(text(summary,17,ACCENT));
+                button("When should we ask for your PIN?",this::chooseMode);
+                if("balanced".equals(mode))button("Remember my PIN for: "+pinDurationLabel(),this::chooseDuration);
+                root.addView(text("Your PIN is still needed for protected settings. Lock now makes the app ask again immediately.",14,MUTED));
+                toggleSecurity("View camera alerts without entering PIN","notification",true);
+                toggleSecurity("Ask for PIN after TV wakes up","sleep",false);
+                toggle("Ask for PIN after 5 minutes of inactivity","idleLock",false,this::resetIdle);
                 button("Change security PIN",this::showChangePin);
                 button("Lock now",()->lock("Camera access locked."));
                 break;
@@ -1019,6 +1044,7 @@ public final class MainActivity extends Activity {
                 });
                 toggle("When Armed Stay","stay",true,null);toggle("When Armed Away","away",true,null);toggle("When Disarmed","disarmed",false,null);
                 toggle("Person lingering / loitering","linger",true,null);toggle("Doorbell pressed","doorbell",true,null);toggle("General motion","motion",false,null);
+                root.addView(text("TV alerts use events already recorded in Vivint history. Phone push notifications can be off, but the camera must still generate a compatible event. These switches do not change your Vivint camera settings.",14,MUTED));
                 toggle("Interactive top-right popup","overlay",false,()->{if(alerts.get("overlay",false)&&!Settings.canDrawOverlays(this))openOverlaySettings();});
                 button("Overlay permission settings",this::openOverlaySettings);button("Test notification",this::testNotification);
                 root.addView(text("Overlay permission: "+(Settings.canDrawOverlays(this)?"Granted":"Not granted")+" · Alerts poll about every 30 seconds.",13,MUTED));
@@ -1037,11 +1063,10 @@ public final class MainActivity extends Activity {
         if(chosen!=null)chosen.requestFocus();
     }
     private void renderAbout(){
-        root.addView(text("Home Security · Version 0.12",22,WHITE));
+        root.addView(text("Home Security · Version 0.13",22,WHITE));
         section("Developer");
         root.addView(text("@1TickRob · Independent software developer\nA community project built for convenient viewing of authorized home cameras on Android TV.",15,MUTED));
         root.addView(text("X / Twitter: @1TickRob",14,ACCENT));
-        root.addView(text("github.com/RobbieSanders/cleanyourtv",13,ACCENT));
         section("Free & unofficial");
         root.addView(text("Provided free of charge. This independent project is not affiliated with, endorsed by, or supported by Vivint or its affiliates. Vivint and other third-party names belong to their respective owners. Use only accounts and cameras you are authorized to access, and follow applicable laws, privacy obligations and service terms.",14,MUTED));
         section("Safety & disclaimer");
@@ -1049,7 +1074,7 @@ public final class MainActivity extends Activity {
         section("Privacy");
         root.addView(text("Your account and compatible camera inventory are retrieved from Vivint. Account session tokens are stored locally using Android Keystore encryption. Your Vivint password is not persisted. Live video uses local network streams; this app has no developer-operated analytics or video upload service. Camera names and layout preferences remain on your device. Anyone with authorized TV access may view cameras according to your PIN settings. Sign out to remove the stored session.",14,MUTED));
         section("Open-source acknowledgments");
-        root.addView(text("CleanYourTV (Gathin) and vivintpy (Nathan Spencer), MIT. LibVLC (VideoLAN and contributors), LGPL; individual modules may carry additional licenses. OkHttp (Square and contributors), Apache 2.0. All third-party license rights remain intact.",14,MUTED));
+        root.addView(text("vivintpy (Nathan Spencer), MIT. LibVLC (VideoLAN and contributors), LGPL; individual modules may carry additional licenses. OkHttp (Square and contributors), Apache 2.0. All third-party license rights remain intact.",14,MUTED));
         button("License notices",this::showLicenses);
     }
     private void showLicenses(){
@@ -1074,12 +1099,12 @@ public final class MainActivity extends Activity {
         button("Continue",()->{
             if(busy)return;String value=pin.getText().toString();
             if(!value.matches("[0-9]{6}")){status.setText("Enter your six-digit PIN.");return;}
-            pin.setText("");busy=true;int gen=generation;
+            pin.setText("");busy=true;authFeedback("Checking PIN…",true);int gen=generation;
             worker.execute(()->{
                 try{long until=vault.checkPin(value);ui.post(()->{
                     if(!current(gen)||!"settingsPin".equals(screen))return;
                     grantAfterPin(until);settingsUntil=SystemClock.elapsedRealtime()+300000L;busy=false;showSettings();
-                });}catch(Exception e){ui.post(()->{if(current(gen)&&"settingsPin".equals(screen)){busy=false;status.setText(safe(e));if(!vault.exists()||safe(e).contains("Locked")||safe(e).contains("PIN locked"))lock(safe(e));}});}
+                });}catch(Exception e){ui.post(()->{if(current(gen)&&"settingsPin".equals(screen)){busy=false;authFeedback(safe(e),false);if(!vault.exists()||safe(e).contains("Locked")||safe(e).contains("PIN locked"))lock(safe(e));}});}
             });
         });
         button("Cancel",this::showGrid);pin.requestFocus();resetIdle();
@@ -1090,10 +1115,13 @@ public final class MainActivity extends Activity {
         root.addView(s,new LinearLayout.LayoutParams(-1,dp(46)));
         s.setOnCheckedChangeListener((view,on)->securityPrefs().edit().putBoolean(key,on).apply());
     }
+    private String pinDurationLabel(){
+        int hours=pinHours();return hours>=24&&hours%24==0?(hours/24)+" "+(hours==24?"day":"days"):hours+" "+(hours==1?"hour":"hours");
+    }
     private void chooseMode(){
-        String[] labels={"Convenience · Live viewing without PIN","Balanced · Remember PIN","Strict · PIN each entry"};
+        String[] labels={"Never for live cameras (Convenience)","Remember my PIN (Balanced)","Every time I open the app (Strict)"};
         String[] modes={"convenience","balanced","strict"};int selected=Arrays.asList(modes).indexOf(pinMode());
-        protectedDialog=new android.app.AlertDialog.Builder(this).setTitle("PIN protection").setSingleChoiceItems(labels,selected,(dialog,index)->{
+        protectedDialog=new android.app.AlertDialog.Builder(this).setTitle("When should we ask for your PIN?").setSingleChoiceItems(labels,selected,(dialog,index)->{
             if(!"settings".equals(screen)||settingsUntil<=SystemClock.elapsedRealtime()){dialog.dismiss();return;}
             securityPrefs().edit().putString("mode",modes[index]).apply();dialog.dismiss();grantAfterPin(sessionUntil);showSettings();
         }).setNegativeButton("Cancel",null).show();
@@ -1101,7 +1129,7 @@ public final class MainActivity extends Activity {
     private void chooseDuration(){
         int[] hours={1,12,24,168,720};String[] labels={"1 hour","12 hours","24 hours","7 days","30 days"};
         int selected=-1;for(int i=0;i<hours.length;i++)if(hours[i]==pinHours())selected=i;
-        protectedDialog=new android.app.AlertDialog.Builder(this).setTitle("Remember PIN authorization").setSingleChoiceItems(labels,selected,(dialog,index)->{
+        protectedDialog=new android.app.AlertDialog.Builder(this).setTitle("How long should we remember your PIN?").setSingleChoiceItems(labels,selected,(dialog,index)->{
             if(!"settings".equals(screen)||settingsUntil<=SystemClock.elapsedRealtime()){dialog.dismiss();return;}
             securityPrefs().edit().putInt("hours",hours[index]).apply();dialog.dismiss();grantAfterPin(sessionUntil);showSettings();
         }).setNegativeButton("Cancel",null).show();
@@ -1206,7 +1234,7 @@ public final class MainActivity extends Activity {
             String before=old.getText().toString(),after=next.getText().toString(),again=confirm.getText().toString();
             if(!before.matches("[0-9]{6}")||!after.matches("[0-9]{6}")||!after.equals(again)){status.setText("Enter your current PIN and matching new six-digit PINs.");return;}
             old.setText("");next.setText("");confirm.setText("");busy=true;
-            status.setText("Updating PIN…");int g=generation;
+            authFeedback("Updating PIN…",true);int g=generation;
             worker.execute(()->{
                 try{
                     long until=vault.changePin(before,after);
@@ -1220,7 +1248,7 @@ public final class MainActivity extends Activity {
                         if(!current(g)||!"changePin".equals(screen))return;
                         busy=false;
                         if(!vault.exists()||error.contains("Locked for five minutes")||error.contains("PIN locked"))lock(error);
-                        else status.setText(error);
+                        else authFeedback(error,false);
                     });
                 }
             });
