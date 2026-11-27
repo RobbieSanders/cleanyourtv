@@ -1080,7 +1080,7 @@ public final class MainActivity extends Activity {
     private void showLicenses(){
         if(!"settings".equals(screen)||settingsUntil<=SystemClock.elapsedRealtime())return;
         StringBuilder notice=new StringBuilder();
-        for(String name:new String[]{"PROJECT-MIT.txt","VIVINTPY-MIT.txt","LIBVLC-LGPL.txt","OKHTTP-APACHE.txt","THIRD-PARTY.txt"}){
+        for(String name:new String[]{"VIVINTPY-MIT.txt","LIBVLC-LGPL.txt","OKHTTP-APACHE.txt","THIRD-PARTY.txt"}){
             try(java.io.InputStream input=getAssets().open("licenses/"+name)){
                 java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();byte[] buf=new byte[4096];int n;
                 while((n=input.read(buf))!=-1)output.write(buf,0,n);

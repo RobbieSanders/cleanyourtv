@@ -1,5 +1,3 @@
-Home Security source: https://github.com/RobbieSanders/cleanyourtv/tree/recording-research/camera-test
-Original CleanYourTV license: repository LICENSE.
 Vivint API research: https://github.com/natekspencer/vivintpy (MIT, Nathan Spencer).
 LibVLC for Android 3.6.5: https://code.videolan.org/videolan/libvlcjni and https://code.videolan.org/videolan/vlc ; LGPL 2.1 text included. Native modules and transitive dependencies may carry additional licenses. See https://www.videolan.org/legal.html .
 OkHttp 4.12.0: https://github.com/square/okhttp ; Apache 2.0. Okio and Kotlin runtime are transitive dependencies; consult their upstream notices.

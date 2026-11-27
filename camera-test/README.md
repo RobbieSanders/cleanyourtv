@@ -45,3 +45,6 @@ Developer credit: @1TickRob (X / Twitter). The GitHub repository remains the sou
 
 ## v0.13
 Plain-language PIN settings and duration labels, immediate PIN check/loading progress and retry feedback, clarification of history-based TV notifications. About no longer advertises the launcher project; original notices and source references remain in License notices to preserve attribution and licensing. No changes to PIN defaults, camera settings, playback or notification polling.
+
+### Independent application attribution
+Home Security was introduced as a separate app in commit 83af63aea7283273db3f72cb0ed986410177189c, with independently added app sources, manifest and Gradle configuration. Sharing a repository and CI wrapper does not make the launcher an APK dependency. The unrelated launcher license and source URL are removed from the Home Security in-app notices; the repository's original LICENSE and launcher attribution are unchanged. Actual third-party notices remain. This is not a full provenance or redistribution compliance audit.
