@@ -34,9 +34,34 @@ final class VivintClient {
         return URLEncoder.encode(s, "UTF-8");
     }
     private static String random() {
-        byte[] b = new byte[32];
+        byte[] b = new byte[40];
         new SecureRandom().nextBytes(b);
-        return Base64.encodeToString(b, Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
+        return Base64.encodeToString(b, Base64.URL_SAFE | Base64.NO_WRAP);
+    }
+    private static String stage(URI uri) {
+        String p=uri.getPath();
+        if(p.equals("/oauth2/auth")) return "OAuth setup";
+        if(p.equals("/idp/api/submit")) return "Account sign-in";
+        if(p.equals("/idp/api/validate")) return "Verification code";
+        if(p.equals("/oauth2/token")) return "Token exchange";
+        if(p.equals("/api/authuser")) return "Account discovery";
+        if(p.startsWith("/api/systems/")) return "Device discovery";
+        if(p.startsWith("/api/panel-login/")) return "Panel authorization";
+        return "Authentication continuation";
+    }
+    private static String safeError(URI uri,int status,JSONObject result) {
+        String label=stage(uri)+": HTTP "+status;
+        String msg=result.optString("msg",result.optString("message",""));
+        if("Invalid username and/or password".equalsIgnoreCase(msg)) return label+" (Vivint rejected the email or password).";
+        String code=result.optString("error","");
+        switch(code) {
+            case "invalid_request": case "invalid_client": case "invalid_grant":
+            case "unauthorized_client": case "unsupported_grant_type": case "invalid_scope":
+            case "access_denied": case "login_required": case "interaction_required":
+            case "temporarily_unavailable": case "server_error":
+                return label+" ("+code+").";
+            default: return label+" (no recognized error code).";
+        }
     }
     private static String query(String... pairs) throws Exception {
         StringBuilder b = new StringBuilder();
@@ -62,7 +87,7 @@ final class VivintClient {
         c.setInstanceFollowRedirects(false);
         c.setConnectTimeout(15000);
         c.setReadTimeout(20000);
-        c.setRequestProperty("Accept","application/json");
+        c.setRequestProperty("Accept","*/*");
         for (java.util.Map.Entry<String,List<String>> entry : cookies.get(uri, java.util.Collections.emptyMap()).entrySet()) {
             for (String value : entry.getValue()) c.addRequestProperty(entry.getKey(),value);
         }
@@ -101,13 +126,13 @@ final class VivintClient {
             JSONObject result;
             try { result=new JSONObject(raw); }
             catch (Exception e) {
-                if (status>=400) throw new Exception("Vivint returned HTTP "+status+".");
+                if (status>=400) throw new Exception(stage(uri)+": HTTP "+status+" (non-JSON response).");
                 return new JSONObject();
             }
             if (status>=400) {
                 if (!authorized && (result.has("validate") || result.has("mfa") ||
-                    "Multi-factor authentication required".equals(result.optString("msg")))) return result;
-                throw new Exception("Vivint returned HTTP "+status+". Check sign-in or account permissions.");
+                    "Multi-factor authentication required".equals(result.optString("msg",result.optString("message",""))))) return result;
+                throw new Exception(safeError(uri,status,result));
             }
             return result;
         } finally { c.disconnect(); }
@@ -148,18 +173,20 @@ final class VivintClient {
         return response;
     }
     private boolean accept(JSONObject response) throws Exception {
-        if(response.has("validate") || "Multi-factor authentication required".equals(response.optString("msg"))) {
+        if(response.has("validate") || "Multi-factor authentication required".equals(response.optString("msg",response.optString("message","")))) {
             mfaType="code"; return false;
         }
         if(response.has("mfa")) { mfaType="mfa"; return false; }
         JSONObject result=finish(response);
         token=result.optString("access_token","");
-        if(token.isEmpty()) throw new Exception("Vivint did not return an access token.");
+        if(token.isEmpty()) throw new Exception("Authentication response did not contain an access token.");
         password=null; username=null; verifier=null; state=null; mfaType=null;
         return true;
     }
     boolean login(String user,String pass) throws Exception {
-        username=user; password=pass; verifier=random(); state=random();
+        username=user; password=pass;
+        do { verifier=random().replaceAll("[^a-zA-Z0-9]",""); } while(verifier.length()<43);
+        state=random();
         String challenge=Base64.encodeToString(MessageDigest.getInstance("SHA-256")
             .digest(verifier.getBytes(StandardCharsets.UTF_8)),Base64.URL_SAFE|Base64.NO_WRAP|Base64.NO_PADDING);
         JSONObject initial=get(ID+"/oauth2/auth?"+query("response_type","code","client_id","ios",
