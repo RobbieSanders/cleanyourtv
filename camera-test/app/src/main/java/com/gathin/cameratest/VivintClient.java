@@ -370,7 +370,11 @@ final class VivintClient {
     private static String recordingValue(JSONObject camera,String key){
         Object value=camera.opt(key);
         if(value instanceof Boolean)return value.toString();
-        if(value instanceof Number){double n=((Number)value).doubleValue();return Double.isFinite(n)&&n>=0&&n<=1000000000000000d?value.toString():"Unavailable";}
+        if(value instanceof Number){double n=((Number)value).doubleValue();
+            if(!Double.isFinite(n)||n<0||n>1000000000000000d)return "Unavailable";
+            if(key.endsWith("_percentage")&&n<=1)return String.format(Locale.US,"%.0f%% (fraction %.3f)",n*100,n);
+            return value.toString();
+        }
         if(value instanceof String){
             String v=((String)value).trim();
             // Status enum strings only; never include arbitrary text or network addresses.

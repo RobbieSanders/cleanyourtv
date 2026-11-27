@@ -45,9 +45,24 @@ public final class AlertService extends Service {
         if(nm!=null){nm.cancel(EVENT);nm.cancel(RUNNING);}
     }
     private NotificationManager nm(){return getSystemService(NotificationManager.class);}
+    private static final Map<String,Ticket> tickets=new LinkedHashMap<>();
+    private static final class Ticket{
+        final String camera;final long expires;
+        Ticket(String c){camera=c;expires=SystemClock.elapsedRealtime()+30000L;}
+    }
+    private static synchronized String ticket(String camera){
+        String token=UUID.randomUUID().toString();tickets.put(token,new Ticket(camera));
+        while(tickets.size()>32)tickets.remove(tickets.keySet().iterator().next());return token;
+    }
+    static synchronized String consume(Intent intent){
+        if(intent==null)return null;
+        String token=intent.getStringExtra("alertTicket");intent.removeExtra("alertTicket");intent.removeExtra("camera");
+        Ticket t=token==null?null:tickets.remove(token);
+        return t!=null&&t.expires>=SystemClock.elapsedRealtime()?t.camera:null;
+    }
     private PendingIntent open(String camera){
         Intent i=new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        if(camera!=null)i.putExtra("camera",camera);
+        if(camera!=null)i.putExtra("alertTicket",ticket(camera));
         return PendingIntent.getActivity(this,camera==null?100:101,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
     }
     @Override public void onCreate(){

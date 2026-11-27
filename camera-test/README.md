@@ -34,3 +34,6 @@ This build adds an opt-in read-only schema report from existing authenticated sy
 
 ## v0.10 diagnostic
 Single view waits for old surfaces to release, labels current quality, retries in both directions and attempts software decode on later retries. Where LibVLC provides displayed-picture statistics, automatic recovery checks frame progress and remembers successful quality per camera. Audio remains opt-in. No claim of verified on-device recovery or historical playback.
+
+## v0.11 Premium Glass 2.0
+Default balanced seven-day authorization stored in encrypted vault, no sleep lock, verified one-time notification ticket for camera-only viewing when PIN authorization expired. Manual lock revokes remembered access and bypass; strict mode locks on leaving. Settings require a fresh PIN with a five-minute foreground grant. Whole-tile focus, long press options, floating single-view controls, darker palette, categorized settings, remembered camera selection and keep-awake setting. Existing 30-day sign-in unchanged. Real event delivery, Sony focus/overlay rendering and security lifecycle require device testing. Native rewind not implemented.

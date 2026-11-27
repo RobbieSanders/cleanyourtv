@@ -108,9 +108,27 @@ final class SessionVault {
                 d.put("failed",failed).put("lockedUntil",0);write(d);
                 throw new Exception("Incorrect PIN. "+(5-failed)+" attempt(s) remaining.");
             }
-            d.put("failed",0).put("lockedUntil",0);write(d);
+            d.put("failed",0).put("lockedUntil",0).put("verifiedAt",now).put("manualLock",false);write(d);
             return d.getLong("issued")+SecurityPolicy.SESSION_MS;
         }
+    }
+    long rememberedUntil(String mode,int hours){
+        synchronized(STORAGE){
+            try{JSONObject d=current();long now=System.currentTimeMillis();
+                return SecurityPolicy.rememberedUntil(d.optLong("verifiedAt"),d.getLong("issued")+SecurityPolicy.SESSION_MS,now,mode,hours,d.optBoolean("manualLock")||d.optLong("lockedUntil")>now);
+            }catch(Exception e){return 0;}
+        }
+    }
+    long notificationUntil(){
+        synchronized(STORAGE){try{JSONObject d=current();long now=System.currentTimeMillis();
+            return d.optBoolean("manualLock")||d.optLong("lockedUntil")>now?0:d.getLong("issued")+SecurityPolicy.SESSION_MS;
+        }catch(Exception e){return 0;}}
+    }
+    long sessionEnd(){
+        synchronized(STORAGE){try{return current().getLong("issued")+SecurityPolicy.SESSION_MS;}catch(Exception e){return 0;}}
+    }
+    void revokeAccess(){
+        synchronized(STORAGE){if(!exists())return;try{JSONObject d=current();d.put("verifiedAt",0).put("manualLock",true);write(d);}catch(Exception e){clear();}}
     }
     long changePin(String oldPin,String newPin)throws Exception{
         if(!newPin.matches("[0-9]{6}"))throw new Exception("Choose a six-digit PIN.");

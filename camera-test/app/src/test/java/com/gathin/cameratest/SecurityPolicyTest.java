@@ -2,6 +2,16 @@ package com.gathin.cameratest;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public class SecurityPolicyTest {
+    @Test public void rememberedAccessExpiresAndNeverExceedsSession(){
+        long now=1000000000L, end=now+SecurityPolicy.SESSION_MS;
+        assertEquals(now+168*3600000L,SecurityPolicy.rememberedUntil(now,end,now,"balanced",168,false));
+        assertEquals(0,SecurityPolicy.rememberedUntil(now-168*3600000L,end,now,"balanced",168,false));
+        assertEquals(0,SecurityPolicy.rememberedUntil(now,end,now,"balanced",168,true));
+        assertEquals(0,SecurityPolicy.rememberedUntil(now,end,now,"strict",168,false));
+        assertEquals(end,SecurityPolicy.rememberedUntil(now,end,now,"convenience",168,false));
+        assertEquals(now+1,SecurityPolicy.rememberedUntil(now,now+1,now,"balanced",168,false));
+        assertEquals(0,SecurityPolicy.rememberedUntil(now+1,end,now,"balanced",168,false));
+    }
     @Test public void exactlyThirtyDaysExpires(){
         long issued=1000000L;
         assertTrue(SecurityPolicy.valid(issued,issued,issued+SecurityPolicy.SESSION_MS-1));

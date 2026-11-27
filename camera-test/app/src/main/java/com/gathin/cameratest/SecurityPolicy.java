@@ -9,6 +9,13 @@ final class SecurityPolicy {
     static boolean valid(long issued,long lastSeen,long now){
         return issued>0 && now>=issued && now>=lastSeen-300000L && now-issued<SESSION_MS;
     }
+    static long rememberedUntil(long verified,long sessionEnd,long now,String mode,int hours,boolean locked){
+        if(locked||now>=sessionEnd||"strict".equals(mode))return 0;
+        if("convenience".equals(mode))return sessionEnd;
+        if(!"balanced".equals(mode)||verified<=0||verified>now||hours<1||hours>720)return 0;
+        long until=Math.min(sessionEnd,verified+hours*3600000L);
+        return until>now?until:0;
+    }
     static String arm(int code){
         switch(code){case 3:case 5:return "Armed Stay";case 4:case 6:return "Armed Away";case 0:return "Disarmed";default:return "Unknown";}
     }
