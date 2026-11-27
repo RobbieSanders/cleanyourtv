@@ -1039,7 +1039,8 @@ public final class MainActivity extends Activity {
     private void renderAbout(){
         root.addView(text("Home Security · Version 0.12",22,WHITE));
         section("Developer");
-        root.addView(text("RobbieSanders · Independent software developer\nA community project built for convenient viewing of authorized home cameras on Android TV.",15,MUTED));
+        root.addView(text("@1TickRob · Independent software developer\nA community project built for convenient viewing of authorized home cameras on Android TV.",15,MUTED));
+        root.addView(text("X / Twitter: @1TickRob",14,ACCENT));
         root.addView(text("github.com/RobbieSanders/cleanyourtv",13,ACCENT));
         section("Free & unofficial");
         root.addView(text("Provided free of charge. This independent project is not affiliated with, endorsed by, or supported by Vivint or its affiliates. Vivint and other third-party names belong to their respective owners. Use only accounts and cameras you are authorized to access, and follow applicable laws, privacy obligations and service terms.",14,MUTED));

@@ -40,3 +40,5 @@ Default balanced seven-day authorization stored in encrypted vault, no sleep loc
 
 ## v0.12
 Two-column all-camera catalog, centered numeric authentication with conventional 3x4 keypad, docked controls by default (floating optional), About/developer credit and bundled license notices. Camera names and stream endpoints are dynamically discovered from the signed-in account, not hardcoded. Compatible Android 8+ TV and reachable private RTSP streams required. Independent, free experimental software; not an official Vivint client or substitute for monitoring. Before broad APK distribution review applicable Vivint terms and all bundled library licenses, including exact native-module corresponding source/relinking obligations. No guarantee of legal immunity or compatibility.
+
+Developer credit: @1TickRob (X / Twitter). The GitHub repository remains the source-code location.
