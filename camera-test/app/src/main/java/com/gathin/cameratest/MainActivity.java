@@ -43,7 +43,7 @@ public final class MainActivity extends Activity {
     private final ArrayList<VivintClient.Camera> allCameras=new ArrayList<>();
     private final Runnable hideControls=()->{
         if("single".equals(this.screen)&&singleBar!=null&&this.singleCanvas!=null){
-            this.singleCanvas.requestFocus();singleBar.setVisibility(View.GONE);controlsHidden=true;
+            singleBar.setVisibility(View.GONE);controlsHidden=true;this.singleCanvas.requestFocus();
         }
     };
     private String singleReturn="grid";
@@ -70,7 +70,12 @@ public final class MainActivity extends Activity {
     private boolean notificationEntry=false,notificationOnly=false;
     private String settingsCategory="Cameras";
     private BroadcastReceiver screenOff;
-    private final Runnable idle=()->{if(alerts.get("idleLock",false))lock("Camera access locked.");else expireView();};
+    private final Runnable idle=()->{if(alerts.get("idleLock",false)&&!notificationOnly)lock("Camera access locked.");else expireView();};
+    private final Runnable settingsExpiry=()->{
+        if("settings".equals(this.screen)||"changePin".equals(this.screen)||"manage".equals(this.screen)){
+            settingsUntil=0;generation++;busy=false;showGrid();
+        }
+    };
     private SharedPreferences securityPrefs(){return getSharedPreferences("view_security",MODE_PRIVATE);}
     private String pinMode(){return securityPrefs().getString("mode","balanced");}
     private int pinHours(){return securityPrefs().getInt("hours",168);}
@@ -118,7 +123,7 @@ public final class MainActivity extends Activity {
         visible=false;
         if(permissionTrip){releaseAll();ui.removeCallbacks(idle);}
         else{
-            if("strict".equals(pinMode())||alerts.get("idleLock",false))vault.revokeAccess();
+            if("strict".equals(pinMode()))vault.revokeAccess();
             targetCamera=null;notificationEntry=false;suspendView();
         }
         super.onPause();
@@ -160,13 +165,15 @@ public final class MainActivity extends Activity {
         ui.postDelayed(idle,alerts.get("idleLock",false)?Math.min(left,SecurityPolicy.IDLE_MS):left);
     }
     private void invalidate(){
-        generation++;busy=false;ui.removeCallbacks(idle);releaseAll();
+        generation++;busy=false;ui.removeCallbacks(idle);ui.removeCallbacks(settingsExpiry);releaseAll();
         cameras.clear();allCameras.clear();overview=null;overviewAt=0;
         if(pending!=null){pending.clear();pending=null;}
     }
     private void expireView(){
+        boolean exit=notificationOnly;
         invalidate();sessionUntil=0;viewUntil=0;settingsUntil=0;notificationOnly=false;notificationEntry=false;targetCamera=null;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if(exit){finish();return;}
         if(!isFinishing()&&!isDestroyed())entry("PIN authorization expired.");
     }
     private void lock(String message){
@@ -485,7 +492,9 @@ public final class MainActivity extends Activity {
         return cameraPrefs().getInt("layout",4)==1?1:4;
     }
     private void showManage(){
+        if(settingsUntil<=SystemClock.elapsedRealtime()){settingsCategory="Cameras";verifySettings();return;}
         if(!unlocked("manage","Camera organization","Favorite cameras appear first. Hidden cameras remain available in All cameras.",true))return;
+        ui.removeCallbacks(settingsExpiry);ui.postDelayed(settingsExpiry,Math.max(1,settingsUntil-SystemClock.elapsedRealtime()));
         section("Dashboard layout");
         LinearLayout layouts=toolbar();
         tool(layouts,capacity()==1?"● Focus":"Focus",()->{cameraPrefs().edit().putInt("layout",1).apply();gridPage=0;showManage();});
@@ -520,6 +529,7 @@ public final class MainActivity extends Activity {
         if(sessionUntil<=System.currentTimeMillis()||viewUntil<=System.currentTimeMillis()||!vault.exists()){expireView();return false;}
         if(notificationOnly&&!"single".equals(name)){finish();return false;}
         releaseAll();screen=name;busy=false;page(title,description,scroll);
+        if(!"settings".equals(name)&&!"manage".equals(name)&&!"changePin".equals(name))ui.removeCallbacks(settingsExpiry);
         if(securityPrefs().getBoolean("keepAwake",true)&&("grid".equals(name)||"single".equals(name)))getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         resetIdle();
@@ -532,7 +542,7 @@ public final class MainActivity extends Activity {
     }
     private void showGrid(){
         gridPage=Math.max(0,Math.min(gridPage,pages()-1));
-        if(!unlocked("grid","Home Security",cameras.size()+" visible / "+allCameras.size()+" cameras  ·  "+(capacity()==1?"Focus":"SD overview")+"  ·  Page "+(gridPage+1)+" of "+pages()+(overview==null?"":"  ·  "+overview.arm+" (last checked)"),false))return;
+        if(!unlocked("grid","Home Security",cameras.size()+" cameras"+(overview==null?"":"  ·  "+overview.arm+" (last checked)")+(pages()>1?"  ·  Page "+(gridPage+1)+" of "+pages():""),false))return;
         LinearLayout bar=toolbar();
         Button list=tool(bar,"All cameras",this::showList);
         tool(bar,"Activity",this::showActivity);
@@ -616,7 +626,7 @@ public final class MainActivity extends Activity {
                 singleReturn="list";showSingle(c,preferredHd(c));
             });
         }
-        button("Organize cameras",this::showManage);
+        button("Organize cameras",()->{settingsCategory="Cameras";showSettings();});
         button("Refresh cameras",this::refreshCameras);
         button("Camera dashboard",this::showGrid);button("Settings",this::showSettings);button("Lock",()->lock(""));
     }
@@ -670,7 +680,7 @@ public final class MainActivity extends Activity {
         audioStatus=status;
         FrameLayout frame=new FrameLayout(this);
         frame.setBackgroundColor(Color.BLACK);frame.setFocusable(true);frame.setFocusableInTouchMode(true);frame.setId(View.generateViewId());
-        frame.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        frame.setDescendantFocusability(ViewGroup.FOCUS_BEFORE_DESCENDANTS);
         frame.setContentDescription(camera.name+" live video. Left and right switch cameras; Up or OK shows controls.");
         VLCVideoLayout layout=new VLCVideoLayout(this);layout.setFocusable(false);layout.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         frame.addView(layout,new FrameLayout.LayoutParams(-1,-1));
@@ -906,8 +916,9 @@ public final class MainActivity extends Activity {
     }
     private void showSettings(){
         if(notificationOnly){finish();return;}
-        if(settingsUntil<SystemClock.elapsedRealtime()){verifySettings();return;}
+        if(settingsUntil<=SystemClock.elapsedRealtime()){verifySettings();return;}
         if(!unlocked("settings","Settings","Home Security · Premium Glass",false))return;
+        ui.removeCallbacks(settingsExpiry);ui.postDelayed(settingsExpiry,Math.max(1,settingsUntil-SystemClock.elapsedRealtime()));
         LinearLayout shell=new LinearLayout(this);shell.setOrientation(LinearLayout.HORIZONTAL);root.addView(shell,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout nav=new LinearLayout(this);nav.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(dp(180),-1);np.rightMargin=dp(12);shell.addView(nav,np);
@@ -1032,7 +1043,7 @@ public final class MainActivity extends Activity {
                 ui.post(()->{
                     overviewLoading=false;if(!current(g))return;
                     overview=value;overviewAt=SystemClock.elapsedRealtime();
-                    if("grid".equals(screen))status.setText(cameras.size()+" visible / "+allCameras.size()+" cameras  ·  "+value.arm+" (last checked)  ·  Page "+(gridPage+1)+" of "+pages());
+                    if("grid".equals(screen))status.setText(cameras.size()+" cameras  ·  "+value.arm+" (last checked)"+(pages()>1?"  ·  Page "+(gridPage+1)+" of "+pages():""));
                     if("activity".equals(screen))renderActivity();
                 });
             }catch(Exception e){ui.post(()->{overviewLoading=false;if(current(g)&&"activity".equals(screen))status.setText("Recent activity could not be loaded. Try refresh.");});}
@@ -1095,7 +1106,9 @@ public final class MainActivity extends Activity {
         });
     }
     private void showChangePin(){
+        if(settingsUntil<=SystemClock.elapsedRealtime()){settingsCategory="Security";verifySettings();return;}
         if(!unlocked("changePin","Change PIN","Verify your current PIN, then choose a new six-digit PIN. Your 30-day session stays unchanged.",true))return;
+        ui.removeCallbacks(settingsExpiry);ui.postDelayed(settingsExpiry,Math.max(1,settingsUntil-SystemClock.elapsedRealtime()));
         authPage("Change your PIN.","Your 30-day Vivint session will stay unchanged.","Protected access");
         EditText old=field("Current PIN",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         EditText next=field("New six-digit PIN",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);
