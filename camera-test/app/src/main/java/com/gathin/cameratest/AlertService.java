@@ -5,6 +5,7 @@ import android.content.*;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.os.*;
 import android.provider.Settings;
 import android.view.*;
@@ -163,6 +164,16 @@ public final class AlertService extends Service {
             +" · A submitted window may still be hidden by TV firmware.");
     }
     private int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
+    private GradientDrawable popupButtonBackground(int color,int edge){
+        GradientDrawable bg=new GradientDrawable();bg.setColor(color);bg.setCornerRadius(dp(8));bg.setStroke(dp(2),edge);return bg;
+    }
+    private Button popupButton(String name,boolean primary){
+        Button b=new Button(this);b.setAllCaps(false);b.setText(name);b.setTextSize(14);b.setTextColor(primary?0xff102030:Color.WHITE);
+        StateListDrawable bg=new StateListDrawable();
+        bg.addState(new int[]{android.R.attr.state_focused},popupButtonBackground(primary?0xffd8f3ff:0xff344b61,0xff9edcff));
+        bg.addState(new int[]{},popupButtonBackground(primary?0xffa3ddff:0xff263749,0xff526a80));
+        b.setBackground(bg);b.setFocusable(true);return b;
+    }
     private boolean showOverlay(VivintClient.Alert a){
         hideOverlay();
         try{
@@ -177,13 +188,14 @@ public final class AlertService extends Service {
             TextView heading=new TextView(this);heading.setText("Home Security");heading.setTextColor(0xff9edcff);heading.setTextSize(15);box.addView(heading);
             TextView detail=new TextView(this);detail.setText(a.kind+"\n"+a.camera+" · "+a.arm);detail.setTextColor(Color.WHITE);detail.setTextSize(18);box.addView(detail);
             LinearLayout actions=new LinearLayout(this);
-            Button no=new Button(this);no.setText("Dismiss");no.setOnClickListener(v->{hideOverlay();nm().cancel(EVENT);});
-            Button yes=new Button(this);yes.setText("View");yes.setOnClickListener(v->{
+            Button no=popupButton("Dismiss",false);no.setOnClickListener(v->{hideOverlay();nm().cancel(EVENT);});
+            Button yes=popupButton("View live",true);yes.setOnClickListener(v->{
                 hideOverlay();nm().cancel(EVENT);
                 try{open(a.camera).send();}catch(PendingIntent.CanceledException ignored){}
             });
-            actions.addView(no,new LinearLayout.LayoutParams(0,dp(48),1));
-            actions.addView(yes,new LinearLayout.LayoutParams(0,dp(48),1));box.addView(actions);
+            LinearLayout.LayoutParams noParams=new LinearLayout.LayoutParams(0,dp(44),1);noParams.setMargins(0,dp(10),dp(5),0);
+            LinearLayout.LayoutParams yesParams=new LinearLayout.LayoutParams(0,dp(44),1);yesParams.setMargins(dp(5),dp(10),0,0);
+            actions.addView(no,noParams);actions.addView(yes,yesParams);box.addView(actions);
             WindowManager.LayoutParams p=new WindowManager.LayoutParams(dp(360),WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL|WindowManager.LayoutParams.FLAG_SECURE,PixelFormat.TRANSLUCENT);
             p.gravity=Gravity.TOP|Gravity.RIGHT;p.x=dp(24);p.y=dp(24);

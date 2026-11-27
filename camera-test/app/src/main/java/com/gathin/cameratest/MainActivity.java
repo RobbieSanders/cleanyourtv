@@ -71,9 +71,13 @@ public final class MainActivity extends Activity {
     private String settingsCategory="Cameras";
     private BroadcastReceiver screenOff;
     private final Runnable idle=()->{if(alerts.get("idleLock",false)&&!notificationOnly)lock("Camera access locked.");else expireView();};
+    private android.app.AlertDialog protectedDialog;
+    private void closeProtectedDialog(){
+        if(protectedDialog!=null){protectedDialog.dismiss();protectedDialog=null;}
+    }
     private final Runnable settingsExpiry=()->{
         if("settings".equals(this.screen)||"changePin".equals(this.screen)||"manage".equals(this.screen)){
-            settingsUntil=0;generation++;busy=false;showGrid();
+            closeProtectedDialog();settingsUntil=0;generation++;busy=false;showGrid();
         }
     };
     private SharedPreferences securityPrefs(){return getSharedPreferences("view_security",MODE_PRIVATE);}
@@ -121,7 +125,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onPause(){
         visible=false;
-        if(permissionTrip){releaseAll();ui.removeCallbacks(idle);}
+        if(permissionTrip){releaseAll();ui.removeCallbacks(idle);ui.removeCallbacks(settingsExpiry);closeProtectedDialog();}
         else{
             if("strict".equals(pinMode()))vault.revokeAccess();
             targetCamera=null;notificationEntry=false;suspendView();
@@ -165,7 +169,7 @@ public final class MainActivity extends Activity {
         ui.postDelayed(idle,alerts.get("idleLock",false)?Math.min(left,SecurityPolicy.IDLE_MS):left);
     }
     private void invalidate(){
-        generation++;busy=false;ui.removeCallbacks(idle);ui.removeCallbacks(settingsExpiry);releaseAll();
+        generation++;busy=false;ui.removeCallbacks(idle);ui.removeCallbacks(settingsExpiry);closeProtectedDialog();releaseAll();
         cameras.clear();allCameras.clear();overview=null;overviewAt=0;
         if(pending!=null){pending.clear();pending=null;}
     }
@@ -467,9 +471,10 @@ public final class MainActivity extends Activity {
         button("Exit",this::finish);pin.requestFocus();
     }
     private void confirmSignOut(){
-        new android.app.AlertDialog.Builder(this).setTitle("Forget this TV's session?")
+        protectedDialog=new android.app.AlertDialog.Builder(this).setTitle("Forget this TV's session?")
             .setMessage("This stops monitoring and requires your Vivint password and verification again. It does not change your Vivint account.")
             .setNegativeButton("Cancel",null).setPositiveButton("Sign out",(d,w)->{
+                if("settings".equals(screen)&&settingsUntil<=SystemClock.elapsedRealtime())return;
                 invalidate();sessionUntil=0;alerts.put("enabled",false);AlertService.stop(this);vault.clear();showLogin("Signed out.");
             }).show();
     }
@@ -608,7 +613,7 @@ public final class MainActivity extends Activity {
         loadOverview(false);
     }
     private void cameraOptions(VivintClient.Camera camera,int index){
-        new android.app.AlertDialog.Builder(this).setTitle(camera.name)
+        protectedDialog=new android.app.AlertDialog.Builder(this).setTitle(camera.name)
             .setItems(new String[]{"Open HD","Open SD","Refresh camera dashboard"},(dialog,which)->{
                 if(which==2){refreshCameras();return;}
                 selectedIndex=index;singleReturn="grid";showSingle(camera,which==0);
@@ -1007,14 +1012,16 @@ public final class MainActivity extends Activity {
     private void chooseMode(){
         String[] labels={"Convenience · Live viewing without PIN","Balanced · Remember PIN","Strict · PIN each entry"};
         String[] modes={"convenience","balanced","strict"};int selected=Arrays.asList(modes).indexOf(pinMode());
-        new android.app.AlertDialog.Builder(this).setTitle("PIN protection").setSingleChoiceItems(labels,selected,(dialog,index)->{
+        protectedDialog=new android.app.AlertDialog.Builder(this).setTitle("PIN protection").setSingleChoiceItems(labels,selected,(dialog,index)->{
+            if(!"settings".equals(screen)||settingsUntil<=SystemClock.elapsedRealtime()){dialog.dismiss();return;}
             securityPrefs().edit().putString("mode",modes[index]).apply();dialog.dismiss();grantAfterPin(sessionUntil);showSettings();
         }).setNegativeButton("Cancel",null).show();
     }
     private void chooseDuration(){
         int[] hours={1,12,24,168,720};String[] labels={"1 hour","12 hours","24 hours","7 days","30 days"};
         int selected=-1;for(int i=0;i<hours.length;i++)if(hours[i]==pinHours())selected=i;
-        new android.app.AlertDialog.Builder(this).setTitle("Remember PIN authorization").setSingleChoiceItems(labels,selected,(dialog,index)->{
+        protectedDialog=new android.app.AlertDialog.Builder(this).setTitle("Remember PIN authorization").setSingleChoiceItems(labels,selected,(dialog,index)->{
+            if(!"settings".equals(screen)||settingsUntil<=SystemClock.elapsedRealtime()){dialog.dismiss();return;}
             securityPrefs().edit().putInt("hours",hours[index]).apply();dialog.dismiss();grantAfterPin(sessionUntil);showSettings();
         }).setNegativeButton("Cancel",null).show();
     }
@@ -1084,7 +1091,7 @@ public final class MainActivity extends Activity {
                     TextView details=new TextView(this);details.setText(report);details.setTextColor(WHITE);
                     details.setTextSize(12);details.setTypeface(android.graphics.Typeface.MONOSPACE);details.setPadding(dp(15),dp(12),dp(15),dp(12));
                     ScrollView scroll=new ScrollView(this);scroll.setFocusable(true);scroll.addView(details);
-                    new android.app.AlertDialog.Builder(this).setTitle("Recording capability diagnostics")
+                    protectedDialog=new android.app.AlertDialog.Builder(this).setTitle("Camera recording & storage health")
                         .setView(scroll).setPositiveButton("Close",null).show();
                     status.setText("Read-only recording capability report ready.");
                 });
