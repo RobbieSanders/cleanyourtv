@@ -14,15 +14,15 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
-          packages: platforms;android-34 build-tools;34.0.0
+          packages: platforms;android-35 build-tools;35.0.0
       - uses: gradle/actions/setup-gradle@v4
       - name: Build independent camera test
         run: |
           chmod +x launcher/gradlew
-          launcher/gradlew -p camera-test --no-daemon assembleDebug
+          launcher/gradlew -p camera-test --no-daemon assembleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: Camera-Test-APK
-          path: camera-test/app/build/outputs/apk/debug/app-debug.apk
+          path: camera-test/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14

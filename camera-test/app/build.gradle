@@ -1,13 +1,19 @@
 plugins { id 'com.android.application' }
 android {
     namespace 'com.gathin.cameratest'
-    compileSdk 34
+    compileSdk 35
     defaultConfig {
         applicationId 'com.gathin.cameratest'
         minSdk 26
         targetSdk 34
         versionCode 1
         versionName '0.1'
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
