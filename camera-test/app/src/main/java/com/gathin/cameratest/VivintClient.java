@@ -5,9 +5,17 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
-import java.net.HttpURLConnection;
+import okhttp3.Cookie;
+import okhttp3.CookieJar;
+import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import okhttp3.MediaType;
+import java.util.concurrent.TimeUnit;
+import java.util.Locale;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -22,7 +30,28 @@ final class VivintClient {
     private static final String ID = "https://id.vivint.com";
     private static final String API = "https://www.vivintsky.com/api";
     private static final String CALLBACK = "vivint://app/oauth_redirect";
-    private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER);
+    private static final class SessionCookies implements CookieJar {
+        private final List<Cookie> values = new ArrayList<>();
+        @Override public synchronized void saveFromResponse(HttpUrl url, List<Cookie> incoming) {
+            for(Cookie c:incoming) {
+                values.removeIf(old -> old.name().equals(c.name()) && old.domain().equals(c.domain()) && old.path().equals(c.path()));
+                if(c.expiresAt()>System.currentTimeMillis()) values.add(c);
+            }
+        }
+        @Override public synchronized List<Cookie> loadForRequest(HttpUrl url) {
+            values.removeIf(c -> c.expiresAt()<=System.currentTimeMillis());
+            List<Cookie> result=new ArrayList<>();
+            for(Cookie c:values) if(c.matches(url)) result.add(c);
+            result.sort((a,b)->Integer.compare(b.path().length(),a.path().length()));
+            return result;
+        }
+        synchronized void clear(){values.clear();}
+    }
+    private final SessionCookies cookies = new SessionCookies();
+    private final OkHttpClient http = new OkHttpClient.Builder()
+        .cookieJar(cookies).followRedirects(false).followSslRedirects(false)
+        .retryOnConnectionFailure(false).connectTimeout(15,TimeUnit.SECONDS)
+        .readTimeout(20,TimeUnit.SECONDS).callTimeout(35,TimeUnit.SECONDS).build();
     private String verifier, state, username, password, token, mfaType;
 
     static final class Camera {
@@ -49,11 +78,25 @@ final class VivintClient {
         if(p.startsWith("/api/panel-login/")) return "Panel authorization";
         return "Authentication continuation";
     }
-    private static String safeError(URI uri,int status,JSONObject result) {
+    private static String safeError(URI uri,int status,JSONObject result,int cookieCount) {
         String label=stage(uri)+": HTTP "+status;
         String msg=result.optString("msg",result.optString("message",""));
         if("Invalid username and/or password".equalsIgnoreCase(msg)) return label+" (Vivint rejected the email or password).";
         String code=result.optString("error","");
+        String description=(msg+" "+code+" "+result.optString("error_description","")+" "+result.optString("errorMessage","")).toLowerCase(Locale.ROOT);
+        if(status==429 || description.contains("too many") || description.contains("rate limit"))
+            return label+" (rate limited; stop and try later).";
+        if(uri.getPath().equals("/idp/api/validate")){
+            String info=" [session cookies: "+cookieCount+"]";
+            if(description.contains("expired")) return label+" (expired verification or session)."+info;
+            if(description.contains("session") || description.contains("cookie") || description.contains("challenge"))
+                return label+" (session or challenge rejected)."+info;
+            if(description.contains("invalid") || description.contains("incorrect") || description.contains("wrong") || description.contains("mismatch"))
+                return label+" (verification rejected)."+info;
+            if(description.contains("required") || description.contains("missing"))
+                return label+" (required verification data missing)."+info;
+            return label+" (verification rejected; no recognized reason)."+info;
+        }
         switch(code) {
             case "invalid_request": case "invalid_client": case "invalid_grant":
             case "unauthorized_client": case "unsupported_grant_type": case "invalid_scope":
@@ -83,59 +126,47 @@ final class VivintClient {
             uri.getPort()!=-1 || !(authorized ? "www.vivintsky.com".equals(host) : "id.vivint.com".equals(host))) {
             throw new Exception("Unexpected authentication destination.");
         }
-        HttpURLConnection c = (HttpURLConnection) uri.toURL().openConnection();
-        c.setInstanceFollowRedirects(false);
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(20000);
-        c.setRequestProperty("Accept","*/*");
-        for (java.util.Map.Entry<String,List<String>> entry : cookies.get(uri, java.util.Collections.emptyMap()).entrySet()) {
-            for (String value : entry.getValue()) c.addRequestProperty(entry.getKey(),value);
+        HttpUrl url=HttpUrl.get(address);
+        int cookieCount=cookies.loadForRequest(url).size();
+        Request.Builder req=new Request.Builder().url(url).header("Accept","*/*");
+        if(authorized){
+            if(token==null || token.isEmpty()) throw new Exception("Sign in first.");
+            req.header("Authorization","Bearer "+token);
         }
-        if (authorized) {
-            if (token==null || token.isEmpty()) throw new Exception("Sign in first.");
-            c.setRequestProperty("Authorization","Bearer "+token);
-        }
-        try {
-            if (body!=null) {
-                c.setRequestMethod("POST");
-                c.setDoOutput(true);
-                c.setRequestProperty("Content-Type",contentType);
-                byte[] bytes=body.getBytes(StandardCharsets.UTF_8);
-                try (java.io.OutputStream out=c.getOutputStream()) { out.write(bytes); }
-                java.util.Arrays.fill(bytes,(byte)0);
-            }
-            int status=c.getResponseCode();
-            cookies.put(uri,c.getHeaderFields());
-            if (status>=300 && status<400) {
-                String location=c.getHeaderField("Location");
-                if (location==null) throw new Exception("Unexpected redirect.");
+        if(body!=null) req.post(RequestBody.create(body,MediaType.get(contentType)));
+        try(Response response=http.newCall(req.build()).execute()){
+            int status=response.code();
+            if(status>=300 && status<400){
+                String location=response.header("Location");
+                if(location==null) throw new Exception("Unexpected redirect.");
                 return object("location",location);
             }
-            InputStream in=status>=400 ? c.getErrorStream() : c.getInputStream();
+            ResponseBody data=response.body();
             String raw="";
-            if (in!=null) {
-                try (InputStream stream=in; ByteArrayOutputStream out=new ByteArrayOutputStream()) {
+            if(data!=null){
+                try(InputStream stream=data.byteStream(); ByteArrayOutputStream out=new ByteArrayOutputStream()){
                     byte[] buf=new byte[8192]; int n;
-                    while ((n=stream.read(buf))!=-1) {
-                        if (out.size()+n>8*1024*1024) throw new Exception("Response too large.");
+                    while((n=stream.read(buf))!=-1){
+                        if(out.size()+n>8*1024*1024) throw new Exception("Response too large.");
                         out.write(buf,0,n);
                     }
                     raw=new String(out.toByteArray(),StandardCharsets.UTF_8);
                 }
             }
             JSONObject result;
-            try { result=new JSONObject(raw); }
-            catch (Exception e) {
-                if (status>=400) throw new Exception(stage(uri)+": HTTP "+status+" (non-JSON response).");
+            try{result=new JSONObject(raw);}
+            catch(Exception e){
+                if(status>=400) throw new Exception(stage(uri)+": HTTP "+status+" (non-JSON response; session cookies: "+cookieCount+").");
                 return new JSONObject();
             }
-            if (status>=400) {
-                if (!authorized && (result.has("validate") || result.has("mfa") ||
+            if(status>=400){
+                if(!authorized && uri.getPath().equals("/idp/api/submit") && mfaType==null &&
+                   (result.has("validate") || result.has("mfa") ||
                     "Multi-factor authentication required".equals(result.optString("msg",result.optString("message",""))))) return result;
-                throw new Exception(safeError(uri,status,result));
+                throw new Exception(safeError(uri,status,result,cookieCount));
             }
             return result;
-        } finally { c.disconnect(); }
+        }
     }
     private JSONObject get(String address,boolean authorized) throws Exception {
         return request(address,null,null,authorized);
@@ -197,6 +228,7 @@ final class VivintClient {
     }
     boolean verify(String code) throws Exception {
         if(mfaType==null || password==null) throw new Exception("Start sign-in again.");
+        if(!code.matches("[0-9]{4,10}")) throw new Exception("Verification code must contain only digits.");
         return accept(postJson(ID+"/idp/api/"+("code".equals(mfaType)?"validate":"submit")+"?client_id=ios",
             object(mfaType,code,"username",username,"password",password)));
     }
@@ -268,11 +300,11 @@ final class VivintClient {
             }
         }
         if(result.isEmpty()) throw new Exception("No usable local streams returned. Camera privacy or account compatibility may be the cause.");
-        token=null; cookies.getCookieStore().removeAll();
+        token=null; cookies.clear();
         return result;
     }
     void clear() {
         token=null; username=null; password=null; verifier=null; state=null; mfaType=null;
-        cookies.getCookieStore().removeAll();
+        cookies.clear();
     }
 }

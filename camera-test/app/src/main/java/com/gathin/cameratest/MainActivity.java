@@ -109,7 +109,7 @@ public final class MainActivity extends Activity {
         button("Verify",()->{
             if(busy)return;
             String value=code.getText().toString().trim();
-            if(value.isEmpty()){status.setText("Enter the code.");return;}
+            if(!value.matches("[0-9]{4,10}")){status.setText("Enter the numeric code from your newest Vivint message.");return;}
             code.setText("");runAuth(local,()->local.verify(value));
         });
         button("Cancel",()->{generation++;local.clear();client=null;showLogin("");});
