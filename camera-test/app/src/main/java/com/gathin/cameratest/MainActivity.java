@@ -794,6 +794,7 @@ public final class MainActivity extends Activity {
         button("Refresh cameras ("+allCameras.size()+" found)",this::refreshCameras);
         button("Organize cameras / layout",this::showManage);
         button("Recording compatibility",this::showRecordingStatus);
+        button("Recording capability diagnostics",this::showRecordingDiagnostics);
         section("Notifications");
         toggle("Do not disturb","dnd",false,null);
         toggle("Enable camera alerts (experimental)","enabled",false,()->{
@@ -875,6 +876,26 @@ public final class MainActivity extends Activity {
             }
         }
         button("Back to cameras",this::showGrid);
+    }
+    private void showRecordingDiagnostics(){
+        if(busy)return;
+        busy=true;status.setText("Reading recording capability fields…");
+        int g=generation;
+        worker.execute(()->{
+            try{
+                String report=vault.use(VivintClient::recordingDiagnostics);
+                ui.post(()->{
+                    if(!current(g)||!"settings".equals(screen))return;
+                    busy=false;
+                    TextView details=new TextView(this);details.setText(report);details.setTextColor(WHITE);
+                    details.setTextSize(12);details.setTypeface(android.graphics.Typeface.MONOSPACE);details.setPadding(dp(15),dp(12),dp(15),dp(12));
+                    ScrollView scroll=new ScrollView(this);scroll.setFocusable(true);scroll.addView(details);
+                    new android.app.AlertDialog.Builder(this).setTitle("Recording capability diagnostics")
+                        .setView(scroll).setPositiveButton("Close",null).show();
+                    status.setText("Read-only recording capability report ready.");
+                });
+            }catch(Exception e){ui.post(()->{if(current(g)&&"settings".equals(screen)){busy=false;status.setText("Recording diagnostics unavailable.");}});}
+        });
     }
     private void showRecordingStatus(){
         if(busy)return;

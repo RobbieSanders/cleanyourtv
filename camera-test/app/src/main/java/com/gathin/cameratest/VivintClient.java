@@ -350,6 +350,73 @@ final class VivintClient {
         if(result.isEmpty()) throw new Exception("No usable local streams returned. Camera privacy or account compatibility may be the cause.");
         return result;
     }
+    // Diagnostic output contains schema field names and types only, not arbitrary values.
+    private static String schema(JSONObject obj){
+        if(obj==null)return "(none)";
+        java.util.TreeMap<String,String> fields=new java.util.TreeMap<>();
+        java.util.Iterator<String> keys=obj.keys();
+        while(keys.hasNext()&&fields.size()<160){
+            String k=keys.next();
+            if(!k.matches("[a-zA-Z][a-zA-Z0-9_]{0,39}"))continue;
+            Object v=obj.opt(k);
+            String type=v instanceof JSONObject?"object":v instanceof JSONArray?"array":v instanceof Boolean?"bool":v instanceof Number?"number":v instanceof String?"string":"null";
+            if(v instanceof Boolean&&k.toLowerCase(Locale.ROOT).matches(".*(record|playback|dvr|storage|sdcard|continuous).*"))type+="="+v;
+            fields.put(k,type);
+        }
+        StringBuilder b=new StringBuilder();
+        for(java.util.Map.Entry<String,String> e:fields.entrySet()){if(b.length()>0)b.append(", ");b.append(e.getKey()).append(":").append(e.getValue());}
+        return b.length()==0?"(none)":b.toString();
+    }
+    String recordingDiagnostics()throws Exception{
+        JSONObject account=get(API+"/authuser",true);
+        JSONObject user=account.optJSONObject("u");
+        JSONArray systems=user==null?null:user.optJSONArray("system");
+        if(systems==null)throw new Exception("No compatible panels.");
+        StringBuilder out=new StringBuilder("Recording capability schema (read-only)\nNo account identifiers, URLs, tokens, passwords or footage included.\n");
+        int total=0;
+        for(int i=0;i<systems.length();i++){
+            JSONObject entry=systems.optJSONObject(i);if(entry==null)continue;
+            String panel=entry.optString("panid","");if(!panel.matches("[0-9]+"))continue;
+            JSONObject sys=get(API+"/systems/"+panel+"?includerules=false",true).optJSONObject("system");
+            if(sys==null)continue;
+            out.append("\nSystem ").append(i+1).append(" fields: ").append(schema(sys)).append("\n");
+            JSONArray services=sys.optJSONArray("srvs");
+            if(services!=null)for(int j=0;j<services.length();j++){
+                JSONObject service=services.optJSONObject(j);if(service==null)continue;
+                String type=service.optString("t","");
+                // Only expose the known public Smart Drive service name; other types stay redacted.
+                out.append("Service ").append(j+1).append(" ").append("SPMO_DVR".equals(type)?"SPMO_DVR":"other").append(": ").append(schema(service)).append("\n");
+            }
+            JSONArray partitions=sys.optJSONArray("par");
+            if(partitions==null)continue;
+            for(int j=0;j<partitions.length();j++){
+                JSONObject part=partitions.optJSONObject(j);if(part==null)continue;
+                JSONArray devices=part.optJSONArray("d");if(devices==null)continue;
+                for(int k=0;k<devices.length();k++){
+                    JSONObject dev=devices.optJSONObject(k);
+                    if(dev==null||!(dev.has("ciu")||dev.has("cius")))continue;
+                    total++;
+                    String name=dev.optString("n","").toLowerCase(Locale.ROOT);
+                    String label;
+                    switch(name){case "driveway":label="Driveway";break;case "doorbell":label="Doorbell";break;case "backyard":label="Backyard";break;case "living room":label="Living Room";break;default:label="Camera "+total;}
+                    out.append("\n").append(label).append(": ").append(schema(dev)).append("\n");
+                    JSONObject features=dev.optJSONObject("fea");
+                    if(features!=null)out.append("Feature fields: ").append(schema(features)).append("\n");
+                    JSONArray capabilities=dev.optJSONArray("ca");
+                    if(capabilities!=null){
+                        int count=0;
+                        for(int q=0;q<capabilities.length()&&count<12;q++){
+                            JSONObject cap=capabilities.optJSONObject(q);
+                            if(cap!=null){out.append("Capability ").append(++count).append(": ").append(schema(cap)).append("\n");}
+                        }
+                    }
+                    if(out.length()>24000)return out.substring(0,24000)+"\nReport truncated.";
+                }
+            }
+        }
+        out.append("\nCamera count: ").append(total);
+        return out.toString();
+    }
     static final class History{
         final String kind,camera;final long time;
         History(String kind,String camera,long time){this.kind=kind;this.camera=camera;this.time=time;}

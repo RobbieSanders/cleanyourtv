@@ -28,3 +28,6 @@ Playback recovery retries a failed stream once, falls back from HD to SD when av
 
 ## v0.8 TV polish
 Numeric PIN/verification fields use an in-app keypad. Dashboard hides decoder diagnostics. Single-camera buttons preserve remote focus and confirm events are consumed once. No automatic focus-stealing timer. Audio track selection/volume diagnostics and overlay test independent of monitoring settings. Tests report submitted overlay/notification rather than assuming firmware displayed them. No rewind implementation: the tested system reported no compatible Smart Drive service.
+
+## Recording research branch
+This build adds an opt-in read-only schema report from existing authenticated system inventory. It outputs field names/types and explicit recording-related booleans, not raw JSON, URLs, credentials, IDs or footage. No new network endpoint, stream recording, security changes or playback implementation. Compare supported camera schemas against the older indoor camera. Branch is independent of v0.8 main.
